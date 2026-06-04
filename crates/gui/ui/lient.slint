@@ -11,6 +11,7 @@ export struct IssueRow {
 export struct CommentRow { author: string, body: string, created: string }
 export struct TransitionRow { id: string, name: string, to: string, requires: string }
 export struct FieldRow { name: string, options: [string], is-select: bool, value: string }
+export struct PaletteItem { id: string, label: string }
 
 // A small segmented-control button used in the login wizard.
 component Seg inherits Rectangle {
@@ -93,6 +94,11 @@ export component AppWindow inherits Window {
     in-out property <string> view: "main"; // "login" | "main"
     in-out property <string> open-menu: ""; // which menu-bar dropdown is open
 
+    // command palette
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query;
+    in property <[PaletteItem]> palette-items;
+
     // main-view data
     in property <string> me;
     in-out property <bool> demo;
@@ -141,6 +147,32 @@ export component AppWindow inherits Window {
     callback show-login();
     callback quit();
     callback open-url(string);
+    callback palette-filter(string);
+    callback palette-run(string);
+    // open the palette: reset query and populate the full list (Rust filters on "")
+    function open-palette() {
+        root.palette-query = "";
+        root.palette-filter("");
+        root.palette-open = true;
+    }
+
+    // Root focus scope for global shortcuts (Ctrl-K palette, Esc to dismiss).
+    // Keys not handled here propagate to the focused widget, so text input still
+    // works; this only grabs the few combos it recognizes.
+    init => { fs.focus(); }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.modifiers.control && e.text == "k") {
+                root.open-palette();
+                return EventResult.accept;
+            }
+            if (e.text == Key.Escape) {
+                if (root.palette-open) { root.palette-open = false; return EventResult.accept; }
+                if (root.dialog-open) { root.cancel-transition(); return EventResult.accept; }
+                if (root.open-menu != "") { root.open-menu = ""; return EventResult.accept; }
+            }
+            return EventResult.reject;
+        }
 
     // ===================== LOGIN WIZARD =====================
     if root.view == "login": Rectangle {
@@ -233,6 +265,7 @@ export component AppWindow inherits Window {
                 Text { text: root.demo ? "demo mode — fixtures, no server" : ""; color: #c2740a; font-size: 12px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: root.loading ? "loading…" : root.me; color: #59636e; font-size: 12px; vertical-alignment: center; }
+                Button { text: "⌘ Commands"; clicked => { root.open-palette(); } }
                 Button { text: "＋ New"; primary: true; clicked => { root.new-issue(); } }
                 Button { text: "↻ Refresh"; clicked => { root.refresh(); } }
                 Button { text: "Account"; clicked => { root.show-login(); } }
@@ -405,5 +438,53 @@ export component AppWindow inherits Window {
             }
         }
     }
+
+    // ===================== COMMAND PALETTE =====================
+    if root.palette-open: Rectangle {
+        background: #00000066;
+        TouchArea { clicked => { root.palette-open = false; } }
+        Rectangle {
+            width: 540px;
+            height: 380px;
+            x: (parent.width - self.width) / 2;
+            y: 70px;
+            background: white;
+            border-radius: 12px;
+            drop-shadow-blur: 30px;
+            drop-shadow-color: #00000044;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                qedit := LineEdit {
+                    placeholder-text: "Type a command…   (Esc to close, Enter to run)";
+                    text <=> root.palette-query;
+                    init => { self.focus(); }
+                    edited(t) => { root.palette-filter(t); }
+                    accepted => {
+                        if (root.palette-items.length > 0) {
+                            root.palette-run(root.palette-items[0].id);
+                            root.palette-open = false;
+                        }
+                    }
+                }
+                ListView {
+                    for it in root.palette-items: Rectangle {
+                        height: 34px;
+                        border-radius: 6px;
+                        background: pa.has-hover ? #e8f0fe : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            Text { text: it.label; vertical-alignment: center; color: #1b2a3a; }
+                        }
+                        pa := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.palette-run(it.id); root.palette-open = false; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    } // FocusScope
 
 }

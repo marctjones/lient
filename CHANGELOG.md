@@ -6,11 +6,20 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Keyboard shortcuts + command palette (Ctrl-K) and arrow-key list nav.
+- Arrow-key navigation in lists / palette (Enter + click work today).
 - Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" flow (routing is done;
   the browser + loopback exchange is pending).
 - Notification inbox, local cache / offline.
 - Edit dialog: prefilling current custom-field values.
+
+## [0.1.6] - 2026-06-04
+
+### Added
+- **Command palette** — `⌘ Commands` (or **Ctrl-K**) opens a searchable palette:
+  type to filter (New issue / Refresh / Edit / Open in browser / Account / Quit),
+  Enter runs the top match, click to run, **Esc** to dismiss. Filtering is done
+  in Rust (Slint strings can't substring-match); commands re-invoke the existing
+  actions. A root `FocusScope` provides the Ctrl-K / Esc shortcuts.
 
 ## [0.1.5] - 2026-06-04
 

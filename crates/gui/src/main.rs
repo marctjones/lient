@@ -11,6 +11,16 @@ use std::sync::Arc;
 
 slint::include_modules!();
 
+/// Command-palette entries: (id dispatched in on_palette_run, display label).
+const COMMANDS: &[(&str, &str)] = &[
+    ("new", "New issue"),
+    ("refresh", "Refresh My Work"),
+    ("edit", "Edit issue fields"),
+    ("open", "Open issue in browser"),
+    ("account", "Account / sign in"),
+    ("quit", "Quit Lient"),
+];
+
 /// The live data source, swappable at runtime (e.g. after the login wizard).
 /// Held in an `Rc<RefCell<…>>` on the UI thread; we clone the inner `Arc` out
 /// before handing it to a worker thread.
@@ -343,6 +353,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_open_url(|url| {
         let _ = open::that(url.as_str());
     });
+    // command palette: filter in Rust (Slint strings can't substring-match),
+    // dispatch by re-invoking the existing callbacks.
+    {
+        let ui_w = ui.as_weak();
+        ui.on_palette_filter(move |q| {
+            let ui = ui_w.unwrap();
+            let q = q.to_lowercase();
+            let items: Vec<PaletteItem> = COMMANDS
+                .iter()
+                .filter(|(_, label)| label.to_lowercase().contains(&q))
+                .map(|(id, label)| PaletteItem { id: (*id).into(), label: (*label).into() })
+                .collect();
+            ui.set_palette_items(ModelRc::new(VecModel::from(items)));
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_palette_run(move |id| {
+            let ui = ui_w.unwrap();
+            ui.set_palette_open(false);
+            let key = ui.get_selected_key();
+            match id.as_str() {
+                "new" => ui.invoke_new_issue(),
+                "refresh" => ui.invoke_refresh(),
+                "edit" if !key.is_empty() => ui.invoke_edit_issue(key),
+                "open" if !key.is_empty() => ui.invoke_open_browser(key),
+                "account" => ui.invoke_show_login(),
+                "quit" => ui.invoke_quit(),
+                _ => {}
+            }
+        });
+    }
 
     // ---- initial load ----------------------------------------------------
     if view == "main" {
