@@ -1,0 +1,20 @@
+[package]
+name = "lient-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Lient — the native Slint desktop Jira daily-driver, over lient-core."
+default-run = "lient"
+
+[[bin]]
+name = "lient"
+path = "src/main.rs"
+
+[dependencies]
+lient-core = { path = "../core" }
+slint = "1.13"
+serde_json = "1"
+open = "5"
+anyhow = "1"
+
+[build-dependencies]
+slint-build = "1.13"

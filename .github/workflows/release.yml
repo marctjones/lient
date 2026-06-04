@@ -1,0 +1,44 @@
+name: Release
+
+# Build the Windows binary and publish a GitHub Release on a version tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build Windows binary
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release (GUI)
+        run: cargo build --release -p lient-gui
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/lient.exe dist/lient.exe
+          Copy-Item README.md dist/README.md
+          Copy-Item CHANGELOG.md dist/CHANGELOG.md
+          Compress-Archive -Path dist/* -DestinationPath "lient-${{ github.ref_name }}-windows-x86_64.zip" -Force
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            lient-${{ github.ref_name }}-windows-x86_64.zip
+            target/release/lient.exe
+          generate_release_notes: true
+          body: |
+            Lient ${{ github.ref_name }} — Windows 11 build (early).
+
+            Download `lient.exe`. On first run the **login wizard** opens — pick your
+            Jira deployment + sign-in method, Test connection, Save. See CHANGELOG.md.

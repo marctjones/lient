@@ -1,0 +1,11 @@
+# Rust build output
+/target
+**/target
+
+# Local editor/OS cruft
+*.swp
+.DS_Store
+
+# Never commit credentials (the token lives in the OS config dir, not here)
+config.json
+*.token

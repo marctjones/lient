@@ -1,0 +1,216 @@
+//! An in-memory Jira for demo mode, offline development, and tests. Serves a
+//! handful of realistic issues; writes (comment / transition / assign / create)
+//! mutate the in-memory state and are reflected on the next read — so the entire
+//! UI can be exercised, including the write paths, with no server.
+
+use crate::api::Jira;
+use crate::model::*;
+use anyhow::Result;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+pub struct MockJira {
+    state: Mutex<State>,
+}
+
+struct State {
+    me: User,
+    issues: Vec<Issue>,
+    next: u32,
+}
+
+const FIXTURE: &str = r#"[
+  {"key":"ACME-101","id":"1001","fields":{
+    "summary":"Draft the Q3 partnership agreement","status":{"name":"In Progress","id":"3"},
+    "assignee":{"displayName":"Marc Jones","accountId":"me"},"priority":{"name":"High","id":"2"},
+    "issuetype":{"name":"Task","id":"10001"},"labels":["legal","q3"],"duedate":"2026-06-20",
+    "description":"Prepare the first draft of the partnership agreement for review by the GC.",
+    "comment":{"total":1,"comments":[
+      {"id":"5001","author":{"displayName":"Dana Lee","accountId":"dana"},"body":"Please align the indemnification clause with the master template.","created":"2026-06-02T10:15:00.000+0000"}
+    ]}}},
+  {"key":"ACME-102","id":"1002","fields":{
+    "summary":"Review NDA redlines from counterparty","status":{"name":"To Do","id":"1"},
+    "assignee":{"displayName":"Marc Jones","accountId":"me"},"priority":{"name":"Medium","id":"3"},
+    "issuetype":{"name":"Bug","id":"10004"},"labels":["nda"],"duedate":"2026-06-14",
+    "description":"Counterparty returned redlines on sections 4 and 7. Compare to our fallback positions.",
+    "comment":{"total":0,"comments":[]}}},
+  {"key":"ACME-103","id":"1003","fields":{
+    "summary":"Brief the team on the new data-retention policy","status":{"name":"To Do","id":"1"},
+    "assignee":{"displayName":"Marc Jones","accountId":"me"},"priority":{"name":"Low","id":"4"},
+    "issuetype":{"name":"Task","id":"10001"},"labels":["policy","privacy"],
+    "description":"Schedule a 30-min session and circulate the one-pager beforehand.",
+    "comment":{"total":0,"comments":[]}}},
+  {"key":"ACME-104","id":"1004","fields":{
+    "summary":"Close out the vendor onboarding checklist","status":{"name":"Done","id":"5"},
+    "assignee":{"displayName":"Marc Jones","accountId":"me"},"priority":{"name":"Medium","id":"3"},
+    "issuetype":{"name":"Task","id":"10001"},"labels":["vendor"],
+    "description":"All items signed off.","comment":{"total":0,"comments":[]}}}
+]"#;
+
+impl Default for MockJira {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MockJira {
+    pub fn new() -> Self {
+        let issues: Vec<Issue> = serde_json::from_str(FIXTURE).expect("valid fixture");
+        let me = User {
+            display_name: "Marc Jones".into(),
+            account_id: "me".into(),
+            name: "marc".into(),
+            email: "marc@example.com".into(),
+        };
+        MockJira { state: Mutex::new(State { me, issues, next: 105 }) }
+    }
+
+    fn find<'a>(issues: &'a mut [Issue], key: &str) -> Option<&'a mut Issue> {
+        issues.iter_mut().find(|i| i.key == key)
+    }
+}
+
+/// The toy workflow: To Do → In Progress → Done, with a required `resolution`
+/// field on the Done transition (so the dynamic-field dialog has something real).
+fn transitions_for(status: &str) -> Vec<Transition> {
+    let nr = |name: &str, id: &str| Some(NamedRef { name: name.into(), id: id.into() });
+    let start = Transition { id: "21".into(), name: "Start Progress".into(), to: nr("In Progress", "3"), fields: BTreeMap::new() };
+    let backlog = Transition { id: "11".into(), name: "Back to To Do".into(), to: nr("To Do", "1"), fields: BTreeMap::new() };
+    let mut done_fields = BTreeMap::new();
+    done_fields.insert("resolution".to_string(), TransitionField { required: true, name: "Resolution".into() });
+    let done = Transition { id: "31".into(), name: "Done".into(), to: nr("Done", "5"), fields: done_fields };
+    match status {
+        "To Do" => vec![start],
+        "In Progress" => vec![done, backlog],
+        "Done" => vec![Transition { id: "11".into(), name: "Reopen".into(), to: nr("To Do", "1"), fields: BTreeMap::new() }],
+        _ => vec![start],
+    }
+}
+
+impl Jira for MockJira {
+    fn myself(&self) -> Result<User> {
+        Ok(self.state.lock().unwrap().me.clone())
+    }
+
+    fn my_issues(&self, max: u32) -> Result<Vec<Issue>> {
+        let s = self.state.lock().unwrap();
+        let mut v: Vec<Issue> = s.issues.iter().filter(|i| i.status() != "Done").cloned().collect();
+        v.truncate(max as usize);
+        Ok(v)
+    }
+
+    fn search(&self, _jql: &str, max: u32) -> Result<SearchResult> {
+        let s = self.state.lock().unwrap();
+        let issues: Vec<Issue> = s.issues.iter().take(max as usize).cloned().collect();
+        let total = s.issues.len() as u32;
+        Ok(SearchResult { issues, total, start_at: 0 })
+    }
+
+    fn issue(&self, key: &str) -> Result<Issue> {
+        let s = self.state.lock().unwrap();
+        s.issues.iter().find(|i| i.key == key).cloned().ok_or_else(|| anyhow::anyhow!("no such issue {key}"))
+    }
+
+    fn transitions(&self, key: &str) -> Result<Vec<Transition>> {
+        let i = self.issue(key)?;
+        Ok(transitions_for(i.status()))
+    }
+
+    fn transition(&self, key: &str, transition_id: &str, _fields: Value) -> Result<()> {
+        let mut s = self.state.lock().unwrap();
+        let cur = s
+            .issues
+            .iter()
+            .find(|i| i.key == key)
+            .map(|i| i.status().to_string())
+            .ok_or_else(|| anyhow::anyhow!("no such issue {key}"))?;
+        let to = transitions_for(&cur)
+            .into_iter()
+            .find(|t| t.id == transition_id)
+            .and_then(|t| t.to)
+            .ok_or_else(|| anyhow::anyhow!("transition {transition_id} not available"))?;
+        if let Some(i) = s.issues.iter_mut().find(|i| i.key == key) {
+            i.fields.status = Some(to);
+        }
+        Ok(())
+    }
+
+    fn add_comment(&self, key: &str, body: &str) -> Result<Comment> {
+        let mut s = self.state.lock().unwrap();
+        let me = s.me.clone();
+        let i = Self::find(&mut s.issues, key).ok_or_else(|| anyhow::anyhow!("no such issue {key}"))?;
+        let c = Comment {
+            id: format!("c{}", i.fields.comment.as_ref().map(|p| p.comments.len()).unwrap_or(0) + 9000),
+            author: Some(me),
+            body: body.to_string(),
+            created: "2026-06-04T12:00:00.000+0000".into(),
+        };
+        let page = i.fields.comment.get_or_insert_with(CommentPage::default);
+        page.comments.push(c.clone());
+        page.total = page.comments.len() as u32;
+        Ok(c)
+    }
+
+    fn assign(&self, key: &str, assignee: &str) -> Result<()> {
+        let mut s = self.state.lock().unwrap();
+        let i = Self::find(&mut s.issues, key).ok_or_else(|| anyhow::anyhow!("no such issue {key}"))?;
+        i.fields.assignee = Some(User { display_name: assignee.into(), account_id: assignee.into(), name: assignee.into(), email: String::new() });
+        Ok(())
+    }
+
+    fn create_issue(&self, project_key: &str, issue_type: &str, summary: &str, description: Option<&str>, _extra: Value) -> Result<String> {
+        let mut s = self.state.lock().unwrap();
+        let key = format!("{project_key}-{}", s.next);
+        let id = format!("{}", 2000 + s.next);
+        s.next += 1;
+        let mut fields = Fields { summary: summary.to_string(), ..Default::default() };
+        fields.status = Some(NamedRef { name: "To Do".into(), id: "1".into() });
+        fields.issuetype = Some(NamedRef { name: issue_type.into(), id: "0".into() });
+        fields.assignee = Some(s.me.clone());
+        fields.description = description.map(|d| d.to_string());
+        s.issues.push(Issue { key: key.clone(), id, fields });
+        Ok(key)
+    }
+
+    fn browse_url(&self, key: &str) -> String {
+        format!("https://demo.atlassian.net/browse/{key}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mock_serves_and_mutates() {
+        let m = MockJira::new();
+        assert_eq!(m.myself().unwrap().display_name, "Marc Jones");
+
+        // my_issues excludes Done
+        let open = m.my_issues(50).unwrap();
+        assert_eq!(open.len(), 3);
+        assert!(open.iter().all(|i| i.status() != "Done"));
+
+        // comment write is reflected on re-read
+        m.add_comment("ACME-102", "Looks good to me.").unwrap();
+        let i = m.issue("ACME-102").unwrap();
+        assert_eq!(i.fields.comment.unwrap().comments.last().unwrap().body, "Looks good to me.");
+
+        // transition To Do -> In Progress
+        let ts = m.transitions("ACME-102").unwrap();
+        assert_eq!(ts[0].name, "Start Progress");
+        m.transition("ACME-102", "21", Value::Null).unwrap();
+        assert_eq!(m.issue("ACME-102").unwrap().status(), "In Progress");
+
+        // the Done transition advertises a required field
+        let ts = m.transitions("ACME-102").unwrap();
+        let done = ts.iter().find(|t| t.name == "Done").unwrap();
+        assert!(done.fields.get("resolution").unwrap().required);
+
+        // create returns a fresh key that then exists
+        let key = m.create_issue("ACME", "Task", "New thing", Some("desc"), Value::Null).unwrap();
+        assert_eq!(key, "ACME-105");
+        assert_eq!(m.issue(&key).unwrap().summary(), "New thing");
+    }
+}

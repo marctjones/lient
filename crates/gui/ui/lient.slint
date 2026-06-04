@@ -1,0 +1,236 @@
+import { Button, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export struct IssueRow {
+    key: string,
+    summary: string,
+    status: string,
+    priority: string,
+    itype: string,
+    assignee: string,
+}
+export struct CommentRow { author: string, body: string, created: string }
+export struct TransitionRow { id: string, name: string, to: string, requires: string }
+
+// A small segmented-control button used in the login wizard.
+component Seg inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked;
+    height: 30px;
+    border-radius: 7px;
+    background: active ? #2d6cdf : (t.has-hover ? #e9ecf0 : #f1f3f6);
+    HorizontalLayout {
+        padding-left: 13px;
+        padding-right: 13px;
+        Text { text: root.label; color: active ? white : #33414f; font-size: 13px; vertical-alignment: center; }
+    }
+    t := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+export component AppWindow inherits Window {
+    title: "Lient";
+    preferred-width: 1040px;
+    preferred-height: 700px;
+    min-width: 760px;
+    min-height: 480px;
+
+    // view state
+    in-out property <string> view: "main"; // "login" | "main"
+
+    // main-view data
+    in property <string> me;
+    in-out property <bool> demo;
+    in property <bool> loading;
+    in-out property <string> error;
+    in property <[IssueRow]> issues;
+    in-out property <string> selected-key;
+    in property <string> d-summary;
+    in property <string> d-status;
+    in property <string> d-meta;
+    in property <string> d-desc;
+    in property <[CommentRow]> comments;
+    in property <[TransitionRow]> transitions;
+    in-out property <string> comment-draft;
+
+    // login-wizard fields
+    in-out property <string> login-deployment: "cloud"; // "cloud" | "server"
+    in-out property <string> login-method: "token";     // "token" | "pat" | "password" | "raw"
+    in-out property <string> login-url;
+    in-out property <string> login-email;
+    in-out property <string> login-token;
+    in-out property <string> login-username;
+    in-out property <string> login-password;
+    in-out property <string> login-raw;
+    in-out property <string> test-status;
+    in property <bool> testing;
+
+    callback select(string);
+    callback refresh();
+    callback add-comment(string, string);
+    callback do-transition(string, string);
+    callback open-browser(string);
+    callback test-connection();
+    callback save-login();
+    callback show-login();
+
+    // ===================== LOGIN WIZARD =====================
+    if root.view == "login": Rectangle {
+        background: #eef0f3;
+        Rectangle {
+            width: 480px;
+            height: col.preferred-height + 36px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: white;
+            border-radius: 12px;
+            drop-shadow-blur: 22px;
+            drop-shadow-color: #00000022;
+            col := VerticalLayout {
+                padding: 22px;
+                spacing: 11px;
+                Text { text: "Connect to Jira"; font-size: 20px; font-weight: 800; color: #1b2a3a; }
+
+                Text { text: "DEPLOYMENT"; font-size: 10px; letter-spacing: 1px; color: #8a96a3; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Seg { label: "Jira Cloud"; active: root.login-deployment == "cloud"; clicked => { root.login-deployment = "cloud"; root.login-method = "token"; } }
+                    Seg { label: "Server / Data Center"; active: root.login-deployment == "server"; clicked => { root.login-deployment = "server"; root.login-method = "pat"; } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                Text { text: "SIGN-IN METHOD"; font-size: 10px; letter-spacing: 1px; color: #8a96a3; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    if root.login-deployment == "cloud": Seg { label: "API token"; active: root.login-method == "token"; clicked => { root.login-method = "token"; } }
+                    if root.login-deployment == "server": Seg { label: "PAT"; active: root.login-method == "pat"; clicked => { root.login-method = "pat"; } }
+                    if root.login-deployment == "server": Seg { label: "User + Password"; active: root.login-method == "password"; clicked => { root.login-method = "password"; } }
+                    Seg { label: "Advanced"; active: root.login-method == "raw"; clicked => { root.login-method = "raw"; } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                LineEdit { placeholder-text: "Site URL  —  https://you.atlassian.net"; text <=> root.login-url; }
+                if root.login-method == "token": LineEdit { placeholder-text: "Email"; text <=> root.login-email; }
+                if root.login-method == "token": LineEdit { placeholder-text: "API token"; input-type: InputType.password; text <=> root.login-token; }
+                if root.login-method == "pat": LineEdit { placeholder-text: "Personal Access Token"; input-type: InputType.password; text <=> root.login-token; }
+                if root.login-method == "password": LineEdit { placeholder-text: "Username"; text <=> root.login-username; }
+                if root.login-method == "password": LineEdit { placeholder-text: "Password"; input-type: InputType.password; text <=> root.login-password; }
+                if root.login-method == "raw": LineEdit { placeholder-text: "Authorization: Bearer ..."; text <=> root.login-raw; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button { text: root.testing ? "Testing…" : "Test connection"; enabled: !root.testing; clicked => { root.test-connection(); } }
+                    Text { text: root.test-status; font-size: 12px; color: #59636e; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button { text: "Use demo data"; clicked => { root.demo = true; root.view = "main"; root.refresh(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "Save & continue"; primary: true; clicked => { root.save-login(); } }
+                }
+            }
+        }
+    }
+
+    // ===================== MAIN =====================
+    if root.view == "main": VerticalBox {
+        padding: 0px;
+        spacing: 0px;
+
+        Rectangle {
+            height: 46px;
+            background: #f6f7f9;
+            HorizontalBox {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 10px;
+                Text { text: "Lient"; font-size: 17px; font-weight: 800; color: #1b2a3a; vertical-alignment: center; }
+                Text { text: root.demo ? "demo mode — fixtures, no server" : ""; color: #c2740a; font-size: 12px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: root.loading ? "loading…" : root.me; color: #59636e; font-size: 12px; vertical-alignment: center; }
+                Button { text: "↻ Refresh"; clicked => { root.refresh(); } }
+                Button { text: "Account"; clicked => { root.show-login(); } }
+            }
+        }
+        if root.error != "": Rectangle {
+            height: 30px; background: #fdecea;
+            Text { text: root.error; color: #b3261e; font-size: 12px; x: 14px; vertical-alignment: center; }
+        }
+
+        HorizontalBox {
+            padding: 0px;
+            spacing: 0px;
+            Rectangle {
+                width: 392px;
+                background: white;
+                Rectangle { x: parent.width - 1px; width: 1px; background: #e3e6ea; }
+                ListView {
+                    for it in root.issues: Rectangle {
+                        height: 60px;
+                        background: it.key == root.selected-key ? #e8f0fe : (ta.has-hover ? #f2f4f7 : white);
+                        VerticalLayout {
+                            padding: 9px;
+                            spacing: 3px;
+                            HorizontalLayout {
+                                spacing: 7px;
+                                Text { text: it.key; font-weight: 700; color: #2d6cdf; font-size: 12px; }
+                                Text { text: it.status; color: #59636e; font-size: 12px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text { text: it.priority; color: #8a96a3; font-size: 12px; }
+                            }
+                            Text { text: it.summary; color: #1b2a3a; overflow: elide; }
+                        }
+                        ta := TouchArea { mouse-cursor: pointer; clicked => { root.select(it.key); } }
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #fbfbfc;
+                if root.selected-key == "": Text {
+                    text: "Select an issue from My Work";
+                    color: #8a96a3; horizontal-alignment: center; vertical-alignment: center;
+                }
+                if root.selected-key != "": ScrollView {
+                    VerticalBox {
+                        padding: 16px;
+                        spacing: 10px;
+                        HorizontalBox {
+                            Text { text: root.selected-key + "  ·  " + root.d-status; font-weight: 700; color: #2d6cdf; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button { text: "Open in browser ↗"; clicked => { root.open-browser(root.selected-key); } }
+                        }
+                        Text { text: root.d-summary; font-size: 18px; font-weight: 700; color: #1b2a3a; wrap: word-wrap; }
+                        Text { text: root.d-meta; color: #59636e; font-size: 12px; wrap: word-wrap; }
+                        Text { text: "MOVE TO"; font-size: 10px; letter-spacing: 1px; color: #8a96a3; }
+                        HorizontalBox {
+                            alignment: start;
+                            for t in root.transitions: Button {
+                                text: "→ " + t.name + (t.requires != "" ? "  (needs " + t.requires + ")" : "");
+                                clicked => { root.do-transition(root.selected-key, t.id); }
+                            }
+                        }
+                        if root.d-desc != "": Text { text: root.d-desc; color: #2a333c; wrap: word-wrap; }
+                        Text { text: "COMMENTS"; font-size: 10px; letter-spacing: 1px; color: #8a96a3; }
+                        for c in root.comments: Rectangle {
+                            background: white;
+                            border-radius: 7px;
+                            border-width: 1px;
+                            border-color: #e3e6ea;
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 3px;
+                                Text { text: c.author + "  ·  " + c.created; font-size: 11px; color: #8a96a3; }
+                                Text { text: c.body; color: #1b2a3a; wrap: word-wrap; }
+                            }
+                        }
+                        HorizontalBox {
+                            LineEdit { placeholder-text: "Add a comment…"; text <=> root.comment-draft; horizontal-stretch: 1; }
+                            Button { text: "Comment"; primary: true; clicked => { root.add-comment(root.selected-key, root.comment-draft); root.comment-draft = ""; } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

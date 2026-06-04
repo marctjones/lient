@@ -1,0 +1,15 @@
+[package]
+name = "lient-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Lient CLI — a runnable smoke frontend over lient-core (the Slint GUI is the next layer)."
+default-run = "lient-cli"
+
+[[bin]]
+name = "lient-cli"
+path = "src/main.rs"
+
+[dependencies]
+lient-core = { path = "../core" }
+anyhow = "1"
+open = "5"
