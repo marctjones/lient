@@ -148,6 +148,15 @@ impl Jira for MockJira {
         Ok(())
     }
 
+    fn create_targets(&self) -> Result<Vec<(String, String, String)>> {
+        Ok(vec![
+            ("ACME".into(), "Acme Legal".into(), "Task".into()),
+            ("ACME".into(), "Acme Legal".into(), "Matter".into()),
+            ("ACME".into(), "Acme Legal".into(), "Bug".into()),
+            ("OPS".into(), "Operations".into(), "Task".into()),
+        ])
+    }
+
     fn assignable_users(&self, _key: &str) -> Result<Vec<User>> {
         let me = self.state.lock().unwrap().me.clone();
         Ok(vec![
@@ -190,11 +199,18 @@ impl Jira for MockJira {
             schema: FieldSchema { type_: "user".into(), items: String::new() },
             ..Default::default()
         };
+        let labels = TransitionField {
+            required: false,
+            name: "Labels".into(),
+            schema: FieldSchema { type_: "array".into(), items: "string".into() },
+            ..Default::default()
+        };
         Ok(vec![
             ("summary".into(), summary),
             ("assignee".into(), assignee),
             ("priority".into(), prio),
             ("duedate".into(), duedate),
+            ("labels".into(), labels),
             ("customfield_10010".into(), severity),
         ])
     }
@@ -212,6 +228,9 @@ impl Jira for MockJira {
             if let Some(id) = obj.get("priority").and_then(|p| p.get("id")).and_then(|v| v.as_str()) {
                 let name = match id { "2" => "High", "3" => "Medium", "4" => "Low", _ => "Medium" };
                 i.fields.priority = Some(NamedRef { name: name.into(), id: id.into() });
+            }
+            if let Some(arr) = obj.get("labels").and_then(|v| v.as_array()) {
+                i.fields.labels = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
             }
         }
         Ok(())

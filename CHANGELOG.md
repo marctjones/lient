@@ -6,11 +6,20 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Create issue in the GUI (already in `lient-core` + CLI).
+- Keyboard shortcuts + command palette (Ctrl-K) and arrow-key list nav.
 - Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" flow (routing is done;
   the browser + loopback exchange is pending).
-- Command palette, notification inbox, local cache / offline.
-- Edit dialog: labels field + prefilling current custom-field values.
+- Notification inbox, local cache / offline.
+- Edit dialog: prefilling current custom-field values.
+
+## [0.1.5] - 2026-06-04
+
+### Added
+- **Create issue** — a **＋ New** button opens a dialog: pick Project / Type
+  (from `createmeta`), enter Summary + Description, Create. The new issue is
+  selected on success. Core adds `create_targets`.
+- **Labels in the Edit dialog** — comma-separated, prefilled from the issue's
+  current labels; submitted as a string array.
 
 ## [0.1.4] - 2026-06-04
 

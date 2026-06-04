@@ -127,6 +127,7 @@ export component AppWindow inherits Window {
     in property <[FieldRow]> dialog-fields;
 
     callback select(string);
+    callback new-issue();
     callback edit-issue(string);
     callback field-changed(int, string);
     callback submit-transition();
@@ -232,6 +233,7 @@ export component AppWindow inherits Window {
                 Text { text: root.demo ? "demo mode — fixtures, no server" : ""; color: #c2740a; font-size: 12px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: root.loading ? "loading…" : root.me; color: #59636e; font-size: 12px; vertical-alignment: center; }
+                Button { text: "＋ New"; primary: true; clicked => { root.new-issue(); } }
                 Button { text: "↻ Refresh"; clicked => { root.refresh(); } }
                 Button { text: "Account"; clicked => { root.show-login(); } }
             }

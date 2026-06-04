@@ -30,6 +30,8 @@ enum PendingKind {
     Transition { tid: String },
     /// Edit issue fields (submit only the fields the user touched).
     Edit,
+    /// Create a new issue (fields: __projtype / summary / description).
+    Create,
 }
 
 /// A pending field dialog (transition required-fields, or an edit).
@@ -167,6 +169,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     for pf in pend.fields.iter().filter(|f| f.touched) {
                         if pf.key == "assignee" {
                             assignee = Some(pf.value.clone());
+                        } else if pf.key == "labels" {
+                            // comma-separated text → array of label strings
+                            let arr: Vec<serde_json::Value> = pf
+                                .value
+                                .split(',')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                                .map(|s| serde_json::Value::String(s.to_string()))
+                                .collect();
+                            map.insert("labels".into(), serde_json::Value::Array(arr));
                         } else {
                             map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
                         }
@@ -191,6 +203,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         move |ui, k| {
                             load_detail(&ui, jira.clone(), k);
                             load_list(&ui, jira);
+                        },
+                    );
+                }
+                PendingKind::Create => {
+                    let (mut project, mut itype, mut summary, mut desc) = (String::new(), String::new(), String::new(), String::new());
+                    for pf in &pend.fields {
+                        match pf.key.as_str() {
+                            "__projtype" => {
+                                let mut parts = pf.value.splitn(2, '|');
+                                project = parts.next().unwrap_or("").to_string();
+                                itype = parts.next().unwrap_or("").to_string();
+                            }
+                            "summary" => summary = pf.value.clone(),
+                            "description" => desc = pf.value.clone(),
+                            _ => {}
+                        }
+                    }
+                    if summary.trim().is_empty() {
+                        ui.set_error("Summary is required to create an issue.".into());
+                        return;
+                    }
+                    let jira = cell.borrow().clone();
+                    run(
+                        &ui,
+                        jira.clone(),
+                        move |j| {
+                            let d = if desc.trim().is_empty() { None } else { Some(desc.as_str()) };
+                            j.create_issue(&project, &itype, &summary, d, serde_json::Value::Null)
+                        },
+                        move |ui, key| {
+                            load_list(&ui, jira.clone());
+                            ui.set_selected_key(key.clone().into());
+                            ui.set_error(format!("Created {key}").into());
+                            load_detail(&ui, jira, key);
                         },
                     );
                 }
@@ -221,6 +267,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 |ui, (k, metas, issue, users)| open_edit_dialog(&ui, k, metas, &issue, &users),
             );
+        });
+    }
+    {
+        let (ui_w, cell) = (ui.as_weak(), cell.clone());
+        ui.on_new_issue(move || {
+            let ui = ui_w.unwrap();
+            let jira = cell.borrow().clone();
+            run(&ui, jira, |j| j.create_targets(), |ui, targets| open_create_dialog(&ui, targets));
         });
     }
     {
@@ -427,7 +481,7 @@ fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionF
     let mut pfields = Vec::new();
     let mut rows: Vec<FieldRow> = Vec::new();
     for (fkey, mut f) in metas {
-        let show = matches!(fkey.as_str(), "summary" | "assignee" | "priority" | "duedate") || fkey.starts_with("customfield_");
+        let show = matches!(fkey.as_str(), "summary" | "assignee" | "priority" | "duedate" | "labels") || fkey.starts_with("customfield_");
         if !show {
             continue;
         }
@@ -464,6 +518,38 @@ fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionF
     ui.set_dialog_open(true);
 }
 
+/// Build and open the "New issue" dialog from the available project/type targets.
+fn open_create_dialog(ui: &AppWindow, targets: Vec<(String, String, String)>) {
+    if targets.is_empty() {
+        ui.set_error("No projects available to create issues in.".into());
+        return;
+    }
+    // one pick-list entry per (project, type), id encodes "PROJKEY|Type"
+    let combos: Vec<AllowedValue> = targets
+        .iter()
+        .map(|(pk, pn, ty)| AllowedValue { id: format!("{pk}|{ty}"), name: format!("{pn} ({pk}) — {ty}"), value: String::new() })
+        .collect();
+    let labels: Vec<SharedString> = combos.iter().map(|a| a.label().into()).collect();
+    let first_label = combos.first().map(|a| a.label().to_string()).unwrap_or_default();
+    let first_id = combos.first().map(|a| a.id.clone()).unwrap_or_default();
+    let empty = || ModelRc::new(VecModel::from(Vec::<SharedString>::new()));
+
+    let rows = vec![
+        FieldRow { name: "Project / Type".into(), options: ModelRc::new(VecModel::from(labels)), is_select: true, value: first_label.into() },
+        FieldRow { name: "Summary".into(), options: empty(), is_select: false, value: "".into() },
+        FieldRow { name: "Description".into(), options: empty(), is_select: false, value: "".into() },
+    ];
+    let pfields = vec![
+        PField { key: "__projtype".into(), field: TransitionField { name: "Project / Type".into(), allowed_values: combos, ..Default::default() }, value: first_id, touched: true },
+        PField { key: "summary".into(), field: TransitionField::default(), value: String::new(), touched: false },
+        PField { key: "description".into(), field: TransitionField::default(), value: String::new(), touched: false },
+    ];
+    PENDING.with(|p| *p.borrow_mut() = Some(Pending { kind: PendingKind::Create, key: String::new(), fields: pfields }));
+    ui.set_dialog_title("New issue".into());
+    ui.set_dialog_fields(ModelRc::new(VecModel::from(rows)));
+    ui.set_dialog_open(true);
+}
+
 /// Prefill an edit field from the issue's current values where we can.
 fn prefill_field(fkey: &str, f: &TransitionField, issue: &Issue, is_select: bool) -> (String, String) {
     match fkey {
@@ -471,6 +557,10 @@ fn prefill_field(fkey: &str, f: &TransitionField, issue: &Issue, is_select: bool
         "duedate" => {
             let d = issue.fields.duedate.clone().unwrap_or_default();
             (d.clone(), d)
+        }
+        "labels" => {
+            let s = issue.fields.labels.join(", ");
+            (s.clone(), s)
         }
         "priority" if is_select => f
             .allowed_values

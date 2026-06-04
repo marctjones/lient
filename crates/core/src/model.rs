@@ -184,6 +184,24 @@ pub struct EditMeta {
     pub fields: std::collections::BTreeMap<String, TransitionField>,
 }
 
+/// `/issue/createmeta?expand=projects.issuetypes` — the projects you can create
+/// in and the issue types each offers.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CreateMeta {
+    #[serde(default)]
+    pub projects: Vec<CreateProject>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CreateProject {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub issuetypes: Vec<NamedRef>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

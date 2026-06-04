@@ -69,6 +69,21 @@ impl JiraClient {
         Ok(resp.transitions)
     }
 
+    /// Projects you can create in, each flattened to one (projectKey, projectName,
+    /// issueType) entry per type — for the "New issue" project/type picker.
+    pub fn create_targets(&self) -> Result<Vec<(String, String, String)>> {
+        let url = self.cfg.api_url("issue/createmeta");
+        let body = self.get(&url).query("expand", "projects.issuetypes").call_text()?;
+        let meta: crate::model::CreateMeta = serde_json::from_str(&body)?;
+        let mut out = Vec::new();
+        for p in meta.projects {
+            for t in p.issuetypes {
+                out.push((p.key.clone(), p.name.clone(), t.name));
+            }
+        }
+        Ok(out)
+    }
+
     /// Users who can be assigned this issue (for the assignee picker).
     pub fn assignable_users(&self, issue_key: &str) -> Result<Vec<User>> {
         let url = self.cfg.api_url("user/assignable/search");

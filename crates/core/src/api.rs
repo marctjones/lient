@@ -16,6 +16,8 @@ pub trait Jira: Send + Sync {
     fn issue(&self, key: &str) -> Result<Issue>;
     fn transitions(&self, key: &str) -> Result<Vec<Transition>>;
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()>;
+    /// Projects × issue types you can create in (projectKey, projectName, type).
+    fn create_targets(&self) -> Result<Vec<(String, String, String)>>;
     /// Users who can be assigned this issue (for the assignee picker).
     fn assignable_users(&self, key: &str) -> Result<Vec<User>>;
     /// Fields editable on this issue (standard + custom), with their metadata.
@@ -57,6 +59,9 @@ impl Jira for JiraClient {
     }
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()> {
         JiraClient::transition(self, key, transition_id, fields)
+    }
+    fn create_targets(&self) -> Result<Vec<(String, String, String)>> {
+        JiraClient::create_targets(self)
     }
     fn assignable_users(&self, key: &str) -> Result<Vec<User>> {
         JiraClient::assignable_users(self, key)
