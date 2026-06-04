@@ -109,6 +109,15 @@ impl JiraClient {
         Ok(())
     }
 
+    /// Add a comment on a Jira Service Management request. `public = true` is a
+    /// reply visible to the customer/requestor; `false` is an internal agent note.
+    /// JSM-only (errors on non-service-desk issues).
+    pub fn add_request_comment(&self, key: &str, body: &str, public: bool) -> Result<()> {
+        let url = self.cfg.servicedesk_url(&format!("request/{key}/comment"));
+        self.post(&url).send_text(&json!({ "body": body, "public": public }).to_string())?;
+        Ok(())
+    }
+
     /// Add a comment (plain text in API v2).
     pub fn add_comment(&self, key: &str, body: &str) -> Result<Comment> {
         let url = self.cfg.api_url(&format!("issue/{key}/comment"));

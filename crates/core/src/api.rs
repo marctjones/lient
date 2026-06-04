@@ -23,6 +23,9 @@ pub trait Jira: Send + Sync {
     /// Update issue fields. `fields` is the Jira `fields` object.
     fn update_issue(&self, key: &str, fields: Value) -> Result<()>;
     fn add_comment(&self, key: &str, body: &str) -> Result<Comment>;
+    /// JSM request comment with visibility: `public = true` replies to the
+    /// customer, `false` is an internal note. JSM-only.
+    fn add_request_comment(&self, key: &str, body: &str, public: bool) -> Result<()>;
     fn assign(&self, key: &str, assignee: &str) -> Result<()>;
     fn create_issue(
         &self,
@@ -66,6 +69,9 @@ impl Jira for JiraClient {
     }
     fn add_comment(&self, key: &str, body: &str) -> Result<Comment> {
         JiraClient::add_comment(self, key, body)
+    }
+    fn add_request_comment(&self, key: &str, body: &str, public: bool) -> Result<()> {
+        JiraClient::add_request_comment(self, key, body, public)
     }
     fn assign(&self, key: &str, assignee: &str) -> Result<()> {
         JiraClient::assign(self, key, assignee)

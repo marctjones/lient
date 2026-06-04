@@ -121,6 +121,12 @@ impl JiraConfig {
         )
     }
 
+    /// `<rest_base>/rest/servicedeskapi/<path>` — Jira Service Management API
+    /// (public/internal customer replies live here, not under /rest/api).
+    pub fn servicedesk_url(&self, path: &str) -> String {
+        format!("{}/rest/servicedeskapi/{}", self.rest_base(), path.trim_start_matches('/'))
+    }
+
     /// `<base>/browse/<KEY>` — for "open in browser".
     pub fn browse_url(&self, key: &str) -> String {
         format!("{}/browse/{}", self.base_url.trim_end_matches('/'), key)

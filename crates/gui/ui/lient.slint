@@ -107,6 +107,7 @@ export component AppWindow inherits Window {
     in property <[CommentRow]> comments;
     in property <[TransitionRow]> transitions;
     in-out property <string> comment-draft;
+    in-out property <bool> reply-public: false; // JSM: reply to customer vs internal note
 
     // login-wizard fields
     in-out property <string> login-deployment: "cloud"; // "cloud" | "server"
@@ -310,8 +311,22 @@ export component AppWindow inherits Window {
                             }
                         }
                         HorizontalBox {
-                            LineEdit { placeholder-text: "Add a comment…"; text <=> root.comment-draft; horizontal-stretch: 1; }
-                            Button { text: "Comment"; primary: true; clicked => { root.add-comment(root.selected-key, root.comment-draft); root.comment-draft = ""; } }
+                            spacing: 6px;
+                            Seg { label: "Internal note"; active: !root.reply-public; clicked => { root.reply-public = false; } }
+                            Seg { label: "Reply to customer"; active: root.reply-public; clicked => { root.reply-public = true; } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        HorizontalBox {
+                            LineEdit {
+                                placeholder-text: root.reply-public ? "Reply to the customer…" : "Add an internal note…";
+                                text <=> root.comment-draft;
+                                horizontal-stretch: 1;
+                            }
+                            Button {
+                                text: root.reply-public ? "Send reply" : "Comment";
+                                primary: true;
+                                clicked => { root.add-comment(root.selected-key, root.comment-draft); root.comment-draft = ""; }
+                            }
                         }
                     }
                 }

@@ -233,6 +233,12 @@ impl Jira for MockJira {
         Ok(c)
     }
 
+    fn add_request_comment(&self, key: &str, body: &str, public: bool) -> Result<()> {
+        // Demo: tag the comment so the public/internal distinction is visible.
+        let tag = if public { "[Reply to customer] " } else { "[Internal note] " };
+        self.add_comment(key, &format!("{tag}{body}")).map(|_| ())
+    }
+
     fn assign(&self, key: &str, assignee: &str) -> Result<()> {
         let mut s = self.state.lock().unwrap();
         let i = Self::find(&mut s.issues, key).ok_or_else(|| anyhow::anyhow!("no such issue {key}"))?;

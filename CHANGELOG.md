@@ -11,7 +11,14 @@ SemVer (pre-1.0: minor = features, patch = fixes).
   the browser + loopback exchange is pending).
 - Command palette, notification inbox, local cache / offline.
 - Edit dialog: labels field + prefilling current custom-field values.
-- JSM public "reply to requestor" (servicedeskapi).
+
+## [0.1.4] - 2026-06-04
+
+### Added
+- **Reply to requestor (Jira Service Management)** — a comment-visibility toggle:
+  *Internal note* (default) vs *Reply to customer* (public). Public replies go
+  through the JSM `servicedeskapi` (`request/{key}/comment` with `public: true`);
+  internal stays on the core comment API. Core adds `add_request_comment`.
 
 ## [0.1.3] - 2026-06-04
 

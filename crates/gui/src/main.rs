@@ -86,10 +86,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let ui = ui_w.unwrap();
             let jira = cell.borrow().clone();
+            // "Reply to customer" → JSM public comment; otherwise a normal comment
+            // (which is an internal note on JSM, a plain comment elsewhere).
+            let public = ui.get_reply_public();
             let (k, b) = (key.to_string(), body.to_string());
-            run(&ui, jira.clone(), move |j| j.add_comment(&k, &b).map(|_| k), move |ui, k| {
-                load_detail(&ui, jira, k);
-            });
+            run(
+                &ui,
+                jira.clone(),
+                move |j| {
+                    if public {
+                        j.add_request_comment(&k, &b, true)?;
+                    } else {
+                        j.add_comment(&k, &b)?;
+                    }
+                    Ok(k)
+                },
+                move |ui, k| load_detail(&ui, jira, k),
+            );
         });
     }
     {
