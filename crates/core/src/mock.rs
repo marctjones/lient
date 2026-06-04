@@ -148,6 +148,15 @@ impl Jira for MockJira {
         Ok(())
     }
 
+    fn assignable_users(&self, _key: &str) -> Result<Vec<User>> {
+        let me = self.state.lock().unwrap().me.clone();
+        Ok(vec![
+            me,
+            User { display_name: "Dana Lee".into(), account_id: "dana".into(), name: "dana".into(), email: "dana@example.com".into() },
+            User { display_name: "Sam Patel".into(), account_id: "sam".into(), name: "sam".into(), email: String::new() },
+        ])
+    }
+
     fn edit_meta(&self, _key: &str) -> Result<Vec<(String, TransitionField)>> {
         let prio = TransitionField {
             required: false,
@@ -175,8 +184,15 @@ impl Jira for MockJira {
                 AllowedValue { id: "101".into(), name: "Sev-2".into(), value: String::new() },
             ],
         };
+        let assignee = TransitionField {
+            required: false,
+            name: "Assignee".into(),
+            schema: FieldSchema { type_: "user".into(), items: String::new() },
+            ..Default::default()
+        };
         Ok(vec![
             ("summary".into(), summary),
+            ("assignee".into(), assignee),
             ("priority".into(), prio),
             ("duedate".into(), duedate),
             ("customfield_10010".into(), severity),

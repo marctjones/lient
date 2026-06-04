@@ -69,6 +69,13 @@ impl JiraClient {
         Ok(resp.transitions)
     }
 
+    /// Users who can be assigned this issue (for the assignee picker).
+    pub fn assignable_users(&self, issue_key: &str) -> Result<Vec<User>> {
+        let url = self.cfg.api_url("user/assignable/search");
+        let body = self.get(&url).query("issueKey", issue_key).query("maxResults", "50").call_text()?;
+        Ok(serde_json::from_str(&body)?)
+    }
+
     /// Fields editable on this issue (standard + custom), with their types and
     /// allowed values — used to render the edit dialog.
     pub fn edit_meta(&self, key: &str) -> Result<Vec<(String, crate::model::TransitionField)>> {

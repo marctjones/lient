@@ -2,7 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use lient_core::client::transition_field_json;
-use lient_core::model::{Comment, Issue, Transition, TransitionField};
+use lient_core::model::{AllowedValue, Comment, Issue, Transition, TransitionField, User};
 use lient_core::{Auth, Jira, JiraClient, JiraConfig, MockJira};
 use slint::{ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -146,14 +146,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     execute_transition(&ui, cell.borrow().clone(), pend.key, tid, serde_json::Value::Object(map));
                 }
                 PendingKind::Edit => {
-                    // edits submit only the fields the user actually changed
+                    // edits submit only the fields the user changed. Assignee goes
+                    // through the dedicated /assignee endpoint (handles Cloud vs
+                    // Server id shape); everything else through PUT /issue.
                     let mut map = serde_json::Map::new();
+                    let mut assignee: Option<String> = None;
                     for pf in pend.fields.iter().filter(|f| f.touched) {
-                        map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
+                        if pf.key == "assignee" {
+                            assignee = Some(pf.value.clone());
+                        } else {
+                            map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
+                        }
                     }
-                    if !map.is_empty() {
-                        execute_update(&ui, cell.borrow().clone(), pend.key, serde_json::Value::Object(map));
+                    if assignee.is_none() && map.is_empty() {
+                        return;
                     }
+                    let jira = cell.borrow().clone();
+                    let key = pend.key;
+                    run(
+                        &ui,
+                        jira.clone(),
+                        move |j| {
+                            if let Some(a) = &assignee {
+                                j.assign(&key, a)?;
+                            }
+                            if !map.is_empty() {
+                                j.update_issue(&key, serde_json::Value::Object(map))?;
+                            }
+                            Ok(key)
+                        },
+                        move |ui, k| {
+                            load_detail(&ui, jira.clone(), k);
+                            load_list(&ui, jira);
+                        },
+                    );
                 }
             }
         });
@@ -177,9 +203,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 move |j| {
                     let metas = j.edit_meta(&k)?;
                     let issue = j.issue(&k)?; // for prefilling current values
-                    Ok((k, metas, issue))
+                    let users = j.assignable_users(&k).unwrap_or_default(); // assignee picker
+                    Ok((k, metas, issue, users))
                 },
-                |ui, (k, metas, issue)| open_edit_dialog(&ui, k, metas, &issue),
+                |ui, (k, metas, issue, users)| open_edit_dialog(&ui, k, metas, &issue, &users),
             );
         });
     }
@@ -380,29 +407,28 @@ fn open_transition_dialog(ui: &AppWindow, key: String, tid: String, req: Vec<(St
     ui.set_dialog_open(true);
 }
 
-/// Run an issue update on a worker thread, then refresh detail + list.
-fn execute_update(ui: &AppWindow, jira: Arc<dyn Jira>, key: String, fields: serde_json::Value) {
-    run(
-        ui,
-        jira.clone(),
-        move |j| j.update_issue(&key, fields).map(|_| key),
-        move |ui, k| {
-            load_detail(&ui, jira.clone(), k);
-            load_list(&ui, jira);
-        },
-    );
-}
-
 /// Populate and open the edit dialog from the issue's editmeta. Shows a curated
 /// set (summary / priority / due date) plus any custom fields, prefilled where we
 /// have the current value; only touched fields are submitted.
-fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionField)>, issue: &Issue) {
+fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionField)>, issue: &Issue, users: &[User]) {
     let mut pfields = Vec::new();
     let mut rows: Vec<FieldRow> = Vec::new();
-    for (fkey, f) in metas {
-        let show = matches!(fkey.as_str(), "summary" | "priority" | "duedate") || fkey.starts_with("customfield_");
+    for (fkey, mut f) in metas {
+        let show = matches!(fkey.as_str(), "summary" | "assignee" | "priority" | "duedate") || fkey.starts_with("customfield_");
         if !show {
             continue;
+        }
+        // The assignee field has no allowedValues from Jira; synthesize a pick-list
+        // from the assignable users (id = accountId on Cloud, name on Server/DC).
+        if fkey == "assignee" {
+            f.allowed_values = users
+                .iter()
+                .map(|u| AllowedValue {
+                    id: if u.account_id.is_empty() { u.name.clone() } else { u.account_id.clone() },
+                    name: u.display_name.clone(),
+                    value: String::new(),
+                })
+                .collect();
         }
         let is_select = f.has_options();
         let options: Vec<SharedString> = f.allowed_values.iter().map(|a| a.label().into()).collect();
@@ -437,6 +463,13 @@ fn prefill_field(fkey: &str, f: &TransitionField, issue: &Issue, is_select: bool
             .allowed_values
             .iter()
             .find(|a| a.label() == issue.priority())
+            .or_else(|| f.allowed_values.first())
+            .map(|a| (a.id.clone(), a.label().to_string()))
+            .unwrap_or_default(),
+        "assignee" if is_select => f
+            .allowed_values
+            .iter()
+            .find(|a| a.label() == issue.assignee())
             .or_else(|| f.allowed_values.first())
             .map(|a| (a.id.clone(), a.label().to_string()))
             .unwrap_or_default(),
