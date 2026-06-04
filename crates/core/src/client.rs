@@ -193,9 +193,26 @@ fn map(resp: Result<ureq::Response, ureq::Error>) -> Result<String> {
     }
 }
 
+/// Build the JSON for one transition field given the user's choice. `value` is
+/// an allowedValue **id** for pick-lists, or raw text otherwise. Arrays (e.g.
+/// labels, multi-select) are wrapped in a list.
+pub fn transition_field_json(field: &crate::model::TransitionField, value: &str) -> serde_json::Value {
+    let inner = if field.has_options() {
+        json!({ "id": value })
+    } else {
+        json!(value)
+    };
+    if field.is_array() {
+        json!([inner])
+    } else {
+        inner
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{AllowedValue, FieldSchema, TransitionField};
 
     #[test]
     fn my_issues_jql_is_sane() {
@@ -203,5 +220,30 @@ mod tests {
         assert!(jql.contains("currentUser()"));
         assert!(jql.contains("statusCategory != Done"));
         assert!(jql.contains("ORDER BY updated DESC"));
+    }
+
+    #[test]
+    fn transition_field_json_shapes() {
+        // a pick-list field -> { "id": <id> }
+        let select = TransitionField {
+            required: true,
+            name: "Resolution".into(),
+            schema: FieldSchema { type_: "resolution".into(), items: String::new() },
+            allowed_values: vec![AllowedValue { id: "10000".into(), name: "Done".into(), value: String::new() }],
+        };
+        assert_eq!(transition_field_json(&select, "10000"), json!({ "id": "10000" }));
+
+        // a free-text field -> raw string
+        let text = TransitionField { required: true, name: "Notes".into(), ..Default::default() };
+        assert_eq!(transition_field_json(&text, "hello"), json!("hello"));
+
+        // an array field -> wrapped list
+        let multi = TransitionField {
+            required: true,
+            name: "Labels".into(),
+            schema: FieldSchema { type_: "array".into(), items: "option".into() },
+            allowed_values: vec![AllowedValue { id: "1".into(), name: "A".into(), value: String::new() }],
+        };
+        assert_eq!(transition_field_json(&multi, "1"), json!([{ "id": "1" }]));
     }
 }

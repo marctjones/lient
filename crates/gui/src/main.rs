@@ -1,9 +1,10 @@
 // Lient — native Slint Jira daily-driver over lient-core.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-use lient_core::model::{Comment, Issue, Transition};
+use lient_core::client::transition_field_json;
+use lient_core::model::{Comment, Issue, Transition, TransitionField};
 use lient_core::{Auth, Jira, JiraClient, JiraConfig, MockJira};
-use slint::{ModelRc, VecModel};
+use slint::{ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,6 +15,26 @@ slint::include_modules!();
 /// Held in an `Rc<RefCell<…>>` on the UI thread; we clone the inner `Arc` out
 /// before handing it to a worker thread.
 type JiraCell = Rc<RefCell<Arc<dyn Jira>>>;
+
+// UI-thread state for the open issue's transitions and the in-progress dialog.
+// Kept in thread-locals because the worker `done` closures must be `Send` and so
+// can't capture `Rc` state (same pattern Noet uses for fold state).
+thread_local! {
+    static TRANSITIONS: RefCell<Vec<Transition>> = const { RefCell::new(Vec::new()) };
+    static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
+}
+
+/// A transition awaiting its required fields in the dialog.
+struct Pending {
+    key: String,
+    tid: String,
+    fields: Vec<PField>,
+}
+struct PField {
+    key: String,            // Jira field key, e.g. "resolution"
+    field: TransitionField, // metadata, for building the submit JSON
+    value: String,          // chosen allowedValue **id**, or raw text
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let force_demo = std::env::var("LIENT_DEMO").is_ok() || std::env::args().any(|a| a == "--demo");
@@ -66,12 +87,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (ui_w, cell) = (ui.as_weak(), cell.clone());
         ui.on_do_transition(move |key, tid| {
             let ui = ui_w.unwrap();
-            let jira = cell.borrow().clone();
             let (k, t) = (key.to_string(), tid.to_string());
-            run(&ui, jira.clone(), move |j| j.transition(&k, &t, serde_json::Value::Null).map(|_| k), move |ui, k| {
-                load_detail(&ui, jira.clone(), k);
-                load_list(&ui, jira);
+            // Required fields for this transition (from the open issue's metadata).
+            let req: Vec<(String, TransitionField)> = TRANSITIONS.with(|ts| {
+                ts.borrow()
+                    .iter()
+                    .find(|x| x.id == t)
+                    .map(|x| x.fields.iter().filter(|(_, f)| f.required).map(|(fk, f)| (fk.clone(), f.clone())).collect())
+                    .unwrap_or_default()
             });
+            if req.is_empty() {
+                // no required fields → just do it
+                execute_transition(&ui, cell.borrow().clone(), k, t, serde_json::Value::Null);
+            } else {
+                open_transition_dialog(&ui, k, t, req);
+            }
+        });
+    }
+    {
+        ui.on_field_changed(move |i, value| {
+            PENDING.with(|p| {
+                if let Some(pend) = p.borrow_mut().as_mut() {
+                    if let Some(pf) = pend.fields.get_mut(i as usize) {
+                        // pick-lists report the chosen label → map back to its id
+                        pf.value = if pf.field.has_options() {
+                            pf.field.allowed_values.iter().find(|a| a.label() == value.as_str()).map(|a| a.id.clone()).unwrap_or_else(|| value.to_string())
+                        } else {
+                            value.to_string()
+                        };
+                    }
+                }
+            });
+        });
+    }
+    {
+        let (ui_w, cell) = (ui.as_weak(), cell.clone());
+        ui.on_submit_transition(move || {
+            let ui = ui_w.unwrap();
+            ui.set_dialog_open(false);
+            if let Some(pend) = PENDING.with(|p| p.borrow_mut().take()) {
+                let mut map = serde_json::Map::new();
+                for pf in &pend.fields {
+                    map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
+                }
+                execute_transition(&ui, cell.borrow().clone(), pend.key, pend.tid, serde_json::Value::Object(map));
+            }
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_cancel_transition(move || {
+            PENDING.with(|p| *p.borrow_mut() = None);
+            ui_w.unwrap().set_dialog_open(false);
         });
     }
     {
@@ -226,6 +293,45 @@ fn load_detail(ui: &AppWindow, jira: Arc<dyn Jira>, key: String) {
     );
 }
 
+/// Run a transition on a worker thread, then refresh detail + list.
+fn execute_transition(ui: &AppWindow, jira: Arc<dyn Jira>, key: String, tid: String, fields: serde_json::Value) {
+    run(
+        ui,
+        jira.clone(),
+        move |j| j.transition(&key, &tid, fields).map(|_| key),
+        move |ui, k| {
+            load_detail(&ui, jira.clone(), k);
+            load_list(&ui, jira);
+        },
+    );
+}
+
+/// Populate and open the required-field dialog for a transition.
+fn open_transition_dialog(ui: &AppWindow, key: String, tid: String, req: Vec<(String, TransitionField)>) {
+    let mut pfields = Vec::new();
+    let mut rows: Vec<FieldRow> = Vec::new();
+    for (fkey, f) in req {
+        let is_select = f.has_options();
+        let options: Vec<SharedString> = f.allowed_values.iter().map(|a| a.label().into()).collect();
+        let (default_id, default_label) = if is_select {
+            f.allowed_values.first().map(|a| (a.id.clone(), a.label().to_string())).unwrap_or_default()
+        } else {
+            (String::new(), String::new())
+        };
+        rows.push(FieldRow {
+            name: f.name.clone().into(),
+            options: ModelRc::new(VecModel::from(options)),
+            is_select,
+            value: default_label.into(),
+        });
+        pfields.push(PField { key: fkey, field: f, value: default_id });
+    }
+    PENDING.with(|p| *p.borrow_mut() = Some(Pending { key: key.clone(), tid, fields: pfields }));
+    ui.set_dialog_title(format!("Confirm: {key}").into());
+    ui.set_dialog_fields(ModelRc::new(VecModel::from(rows)));
+    ui.set_dialog_open(true);
+}
+
 fn to_row(i: &Issue) -> IssueRow {
     IssueRow {
         key: i.key.clone().into(),
@@ -238,6 +344,8 @@ fn to_row(i: &Issue) -> IssueRow {
 }
 
 fn apply_detail(ui: &AppWindow, issue: &Issue, trans: &[Transition]) {
+    // Stash the full transition metadata for the dialog (required fields / options).
+    TRANSITIONS.with(|t| *t.borrow_mut() = trans.to_vec());
     ui.set_d_summary(issue.summary().into());
     ui.set_d_status(issue.status().into());
     let mut meta = format!("{} · {} · {}", issue.issue_type(), issue.priority(), issue.assignee());

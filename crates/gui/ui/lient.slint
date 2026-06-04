@@ -1,4 +1,4 @@
-import { Button, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Button, LineEdit, ComboBox, ListView, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
 export struct IssueRow {
     key: string,
@@ -10,6 +10,7 @@ export struct IssueRow {
 }
 export struct CommentRow { author: string, body: string, created: string }
 export struct TransitionRow { id: string, name: string, to: string, requires: string }
+export struct FieldRow { name: string, options: [string], is-select: bool, value: string }
 
 // A small segmented-control button used in the login wizard.
 component Seg inherits Rectangle {
@@ -64,7 +65,15 @@ export component AppWindow inherits Window {
     in-out property <string> test-status;
     in property <bool> testing;
 
+    // transition required-field dialog
+    in-out property <bool> dialog-open: false;
+    in-out property <string> dialog-title;
+    in property <[FieldRow]> dialog-fields;
+
     callback select(string);
+    callback field-changed(int, string);
+    callback submit-transition();
+    callback cancel-transition();
     callback refresh();
     callback add-comment(string, string);
     callback do-transition(string, string);
@@ -229,6 +238,47 @@ export component AppWindow inherits Window {
                             Button { text: "Comment"; primary: true; clicked => { root.add-comment(root.selected-key, root.comment-draft); root.comment-draft = ""; } }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // ===================== TRANSITION REQUIRED-FIELD DIALOG =====================
+    if root.dialog-open: Rectangle {
+        background: #00000066;
+        TouchArea {} // swallow clicks behind the modal
+        Rectangle {
+            width: 440px;
+            height: dcol.preferred-height + 30px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: white;
+            border-radius: 12px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000033;
+            dcol := VerticalLayout {
+                padding: 20px;
+                spacing: 11px;
+                Text { text: root.dialog-title; font-size: 16px; font-weight: 700; color: #1b2a3a; }
+                Text { text: "This transition needs a few fields:"; font-size: 12px; color: #59636e; }
+                for f[i] in root.dialog-fields: VerticalLayout {
+                    spacing: 3px;
+                    Text { text: f.name; font-size: 11px; font-weight: 600; color: #59636e; }
+                    if f.is-select: ComboBox {
+                        model: f.options;
+                        current-value: f.value;
+                        selected(v) => { root.field-changed(i, v); }
+                    }
+                    if !f.is-select: LineEdit {
+                        text: f.value;
+                        edited(v) => { root.field-changed(i, v); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button { text: "Cancel"; clicked => { root.cancel-transition(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "Confirm"; primary: true; clicked => { root.submit-transition(); } }
                 }
             }
         }

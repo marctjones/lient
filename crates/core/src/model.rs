@@ -124,6 +124,50 @@ pub struct TransitionField {
     pub required: bool,
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub schema: FieldSchema,
+    /// Permitted values for select-type fields (resolution, priority, options…).
+    #[serde(default, rename = "allowedValues")]
+    pub allowed_values: Vec<AllowedValue>,
+}
+
+impl TransitionField {
+    /// True when this field is a pick-list (render a dropdown, not a text box).
+    pub fn has_options(&self) -> bool {
+        !self.allowed_values.is_empty()
+    }
+    pub fn is_array(&self) -> bool {
+        self.schema.type_ == "array"
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FieldSchema {
+    #[serde(default, rename = "type")]
+    pub type_: String,
+    #[serde(default)]
+    pub items: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AllowedValue {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+impl AllowedValue {
+    /// Human label (Jira uses `name` for most, `value` for custom options).
+    pub fn label(&self) -> &str {
+        if !self.name.is_empty() {
+            &self.name
+        } else {
+            &self.value
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

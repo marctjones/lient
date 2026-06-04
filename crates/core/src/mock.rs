@@ -78,7 +78,19 @@ fn transitions_for(status: &str) -> Vec<Transition> {
     let start = Transition { id: "21".into(), name: "Start Progress".into(), to: nr("In Progress", "3"), fields: BTreeMap::new() };
     let backlog = Transition { id: "11".into(), name: "Back to To Do".into(), to: nr("To Do", "1"), fields: BTreeMap::new() };
     let mut done_fields = BTreeMap::new();
-    done_fields.insert("resolution".to_string(), TransitionField { required: true, name: "Resolution".into() });
+    done_fields.insert(
+        "resolution".to_string(),
+        TransitionField {
+            required: true,
+            name: "Resolution".into(),
+            schema: FieldSchema { type_: "resolution".into(), items: String::new() },
+            allowed_values: vec![
+                AllowedValue { id: "10000".into(), name: "Done".into(), value: String::new() },
+                AllowedValue { id: "10001".into(), name: "Won't Do".into(), value: String::new() },
+                AllowedValue { id: "10002".into(), name: "Duplicate".into(), value: String::new() },
+            ],
+        },
+    );
     let done = Transition { id: "31".into(), name: "Done".into(), to: nr("Done", "5"), fields: done_fields };
     match status {
         "To Do" => vec![start],
