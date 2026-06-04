@@ -10,6 +10,16 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 - Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" flow (routing is done;
   the browser + loopback exchange is pending).
 - Command palette, notification inbox, local cache / offline.
+- Edit dialog: labels/assignee fields + prefilling current custom-field values.
+
+## [0.1.2] - 2026-06-04
+
+### Added
+- **Edit issue fields** — an **✎ Edit** button on the detail pane opens a dialog
+  built from `/issue/{key}/editmeta`: dropdowns for pick-lists (priority and
+  **custom fields** with options), text boxes otherwise, prefilled from current
+  values. Submits only the fields you changed via `PUT /issue`. Core adds
+  `edit_meta` + `update_issue` on the client, trait, and mock.
 
 ## [0.1.1] - 2026-06-04
 
