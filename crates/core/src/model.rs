@@ -176,6 +176,14 @@ pub struct TransitionsResponse {
     pub transitions: Vec<Transition>,
 }
 
+/// `/issue/{key}/editmeta` — the fields editable on this issue (standard + custom),
+/// each with the same shape as a transition field (name / schema / allowedValues).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EditMeta {
+    #[serde(default)]
+    pub fields: std::collections::BTreeMap<String, TransitionField>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

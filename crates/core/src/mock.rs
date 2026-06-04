@@ -148,6 +148,59 @@ impl Jira for MockJira {
         Ok(())
     }
 
+    fn edit_meta(&self, _key: &str) -> Result<Vec<(String, TransitionField)>> {
+        let prio = TransitionField {
+            required: false,
+            name: "Priority".into(),
+            schema: FieldSchema { type_: "priority".into(), items: String::new() },
+            allowed_values: vec![
+                AllowedValue { id: "2".into(), name: "High".into(), value: String::new() },
+                AllowedValue { id: "3".into(), name: "Medium".into(), value: String::new() },
+                AllowedValue { id: "4".into(), name: "Low".into(), value: String::new() },
+            ],
+        };
+        let summary = TransitionField { required: false, name: "Summary".into(), ..Default::default() };
+        let duedate = TransitionField {
+            required: false,
+            name: "Due date".into(),
+            schema: FieldSchema { type_: "date".into(), items: String::new() },
+            ..Default::default()
+        };
+        let severity = TransitionField {
+            required: false,
+            name: "Severity (custom field)".into(),
+            schema: FieldSchema { type_: "option".into(), items: String::new() },
+            allowed_values: vec![
+                AllowedValue { id: "100".into(), name: "Sev-1".into(), value: String::new() },
+                AllowedValue { id: "101".into(), name: "Sev-2".into(), value: String::new() },
+            ],
+        };
+        Ok(vec![
+            ("summary".into(), summary),
+            ("priority".into(), prio),
+            ("duedate".into(), duedate),
+            ("customfield_10010".into(), severity),
+        ])
+    }
+
+    fn update_issue(&self, key: &str, fields: Value) -> Result<()> {
+        let mut s = self.state.lock().unwrap();
+        let i = Self::find(&mut s.issues, key).ok_or_else(|| anyhow::anyhow!("no such issue {key}"))?;
+        if let Some(obj) = fields.as_object() {
+            if let Some(v) = obj.get("summary").and_then(|v| v.as_str()) {
+                i.fields.summary = v.to_string();
+            }
+            if let Some(v) = obj.get("duedate").and_then(|v| v.as_str()) {
+                i.fields.duedate = Some(v.to_string());
+            }
+            if let Some(id) = obj.get("priority").and_then(|p| p.get("id")).and_then(|v| v.as_str()) {
+                let name = match id { "2" => "High", "3" => "Medium", "4" => "Low", _ => "Medium" };
+                i.fields.priority = Some(NamedRef { name: name.into(), id: id.into() });
+            }
+        }
+        Ok(())
+    }
+
     fn add_comment(&self, key: &str, body: &str) -> Result<Comment> {
         let mut s = self.state.lock().unwrap();
         let me = s.me.clone();

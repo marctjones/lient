@@ -69,7 +69,24 @@ impl JiraClient {
         Ok(resp.transitions)
     }
 
+    /// Fields editable on this issue (standard + custom), with their types and
+    /// allowed values — used to render the edit dialog.
+    pub fn edit_meta(&self, key: &str) -> Result<Vec<(String, crate::model::TransitionField)>> {
+        let url = self.cfg.api_url(&format!("issue/{key}/editmeta"));
+        let body = self.get(&url).call_text()?;
+        let resp: EditMeta = serde_json::from_str(&body)?;
+        Ok(resp.fields.into_iter().collect())
+    }
+
     // ---- light writes ----------------------------------------------------
+
+    /// Update fields on an issue. `fields` is the Jira `fields` object, e.g.
+    /// `{"priority":{"id":"2"}, "customfield_10010":{"value":"High"}}`.
+    pub fn update_issue(&self, key: &str, fields: serde_json::Value) -> Result<()> {
+        let url = self.cfg.api_url(&format!("issue/{key}"));
+        self.put(&url).send_text(&json!({ "fields": fields }).to_string())?; // 204 on success
+        Ok(())
+    }
 
     /// Move an issue through a transition. `extra_fields` carries any required
     /// screen fields (e.g. `{"resolution":{"name":"Done"}}`), rendered by the UI.

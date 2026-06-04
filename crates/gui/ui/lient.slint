@@ -126,6 +126,7 @@ export component AppWindow inherits Window {
     in property <[FieldRow]> dialog-fields;
 
     callback select(string);
+    callback edit-issue(string);
     callback field-changed(int, string);
     callback submit-transition();
     callback cancel-transition();
@@ -281,6 +282,7 @@ export component AppWindow inherits Window {
                         HorizontalBox {
                             Text { text: root.selected-key + "  ·  " + root.d-status; font-weight: 700; color: #2d6cdf; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; }
+                            Button { text: "✎ Edit"; clicked => { root.edit-issue(root.selected-key); } }
                             Button { text: "Open in browser ↗"; clicked => { root.open-browser(root.selected-key); } }
                         }
                         Text { text: root.d-summary; font-size: 18px; font-weight: 700; color: #1b2a3a; wrap: word-wrap; }

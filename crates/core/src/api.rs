@@ -5,7 +5,7 @@
 //! Object-safe and `Send + Sync` so the GUI can run calls on worker threads.
 
 use crate::client::JiraClient;
-use crate::model::{Comment, Issue, SearchResult, Transition, User};
+use crate::model::{Comment, Issue, SearchResult, Transition, TransitionField, User};
 use anyhow::Result;
 use serde_json::Value;
 
@@ -16,6 +16,10 @@ pub trait Jira: Send + Sync {
     fn issue(&self, key: &str) -> Result<Issue>;
     fn transitions(&self, key: &str) -> Result<Vec<Transition>>;
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()>;
+    /// Fields editable on this issue (standard + custom), with their metadata.
+    fn edit_meta(&self, key: &str) -> Result<Vec<(String, TransitionField)>>;
+    /// Update issue fields. `fields` is the Jira `fields` object.
+    fn update_issue(&self, key: &str, fields: Value) -> Result<()>;
     fn add_comment(&self, key: &str, body: &str) -> Result<Comment>;
     fn assign(&self, key: &str, assignee: &str) -> Result<()>;
     fn create_issue(
@@ -48,6 +52,12 @@ impl Jira for JiraClient {
     }
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()> {
         JiraClient::transition(self, key, transition_id, fields)
+    }
+    fn edit_meta(&self, key: &str) -> Result<Vec<(String, TransitionField)>> {
+        JiraClient::edit_meta(self, key)
+    }
+    fn update_issue(&self, key: &str, fields: Value) -> Result<()> {
+        JiraClient::update_issue(self, key, fields)
     }
     fn add_comment(&self, key: &str, body: &str) -> Result<Comment> {
         JiraClient::add_comment(self, key, body)

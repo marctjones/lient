@@ -24,16 +24,25 @@ thread_local! {
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
 }
 
-/// A transition awaiting its required fields in the dialog.
+/// What the shared field dialog will do on submit.
+enum PendingKind {
+    /// Move through a transition (submit all fields).
+    Transition { tid: String },
+    /// Edit issue fields (submit only the fields the user touched).
+    Edit,
+}
+
+/// A pending field dialog (transition required-fields, or an edit).
 struct Pending {
+    kind: PendingKind,
     key: String,
-    tid: String,
     fields: Vec<PField>,
 }
 struct PField {
-    key: String,            // Jira field key, e.g. "resolution"
+    key: String,            // Jira field key, e.g. "resolution" / "customfield_10010"
     field: TransitionField, // metadata, for building the submit JSON
     value: String,          // chosen allowedValue **id**, or raw text
+    touched: bool,          // did the user change it? (edit mode submits only these)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -115,6 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             value.to_string()
                         };
+                        pf.touched = true;
                     }
                 }
             });
@@ -125,12 +135,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.on_submit_transition(move || {
             let ui = ui_w.unwrap();
             ui.set_dialog_open(false);
-            if let Some(pend) = PENDING.with(|p| p.borrow_mut().take()) {
-                let mut map = serde_json::Map::new();
-                for pf in &pend.fields {
-                    map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
+            let Some(pend) = PENDING.with(|p| p.borrow_mut().take()) else { return };
+            match pend.kind {
+                PendingKind::Transition { tid } => {
+                    // transitions submit all (required) fields
+                    let mut map = serde_json::Map::new();
+                    for pf in &pend.fields {
+                        map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
+                    }
+                    execute_transition(&ui, cell.borrow().clone(), pend.key, tid, serde_json::Value::Object(map));
                 }
-                execute_transition(&ui, cell.borrow().clone(), pend.key, pend.tid, serde_json::Value::Object(map));
+                PendingKind::Edit => {
+                    // edits submit only the fields the user actually changed
+                    let mut map = serde_json::Map::new();
+                    for pf in pend.fields.iter().filter(|f| f.touched) {
+                        map.insert(pf.key.clone(), transition_field_json(&pf.field, &pf.value));
+                    }
+                    if !map.is_empty() {
+                        execute_update(&ui, cell.borrow().clone(), pend.key, serde_json::Value::Object(map));
+                    }
+                }
             }
         });
     }
@@ -139,6 +163,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.on_cancel_transition(move || {
             PENDING.with(|p| *p.borrow_mut() = None);
             ui_w.unwrap().set_dialog_open(false);
+        });
+    }
+    {
+        let (ui_w, cell) = (ui.as_weak(), cell.clone());
+        ui.on_edit_issue(move |key| {
+            let ui = ui_w.unwrap();
+            let jira = cell.borrow().clone();
+            let k = key.to_string();
+            run(
+                &ui,
+                jira,
+                move |j| {
+                    let metas = j.edit_meta(&k)?;
+                    let issue = j.issue(&k)?; // for prefilling current values
+                    Ok((k, metas, issue))
+                },
+                |ui, (k, metas, issue)| open_edit_dialog(&ui, k, metas, &issue),
+            );
         });
     }
     {
@@ -330,12 +372,77 @@ fn open_transition_dialog(ui: &AppWindow, key: String, tid: String, req: Vec<(St
             is_select,
             value: default_label.into(),
         });
-        pfields.push(PField { key: fkey, field: f, value: default_id });
+        pfields.push(PField { key: fkey, field: f, value: default_id, touched: false });
     }
-    PENDING.with(|p| *p.borrow_mut() = Some(Pending { key: key.clone(), tid, fields: pfields }));
+    PENDING.with(|p| *p.borrow_mut() = Some(Pending { kind: PendingKind::Transition { tid }, key: key.clone(), fields: pfields }));
     ui.set_dialog_title(format!("Confirm: {key}").into());
     ui.set_dialog_fields(ModelRc::new(VecModel::from(rows)));
     ui.set_dialog_open(true);
+}
+
+/// Run an issue update on a worker thread, then refresh detail + list.
+fn execute_update(ui: &AppWindow, jira: Arc<dyn Jira>, key: String, fields: serde_json::Value) {
+    run(
+        ui,
+        jira.clone(),
+        move |j| j.update_issue(&key, fields).map(|_| key),
+        move |ui, k| {
+            load_detail(&ui, jira.clone(), k);
+            load_list(&ui, jira);
+        },
+    );
+}
+
+/// Populate and open the edit dialog from the issue's editmeta. Shows a curated
+/// set (summary / priority / due date) plus any custom fields, prefilled where we
+/// have the current value; only touched fields are submitted.
+fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionField)>, issue: &Issue) {
+    let mut pfields = Vec::new();
+    let mut rows: Vec<FieldRow> = Vec::new();
+    for (fkey, f) in metas {
+        let show = matches!(fkey.as_str(), "summary" | "priority" | "duedate") || fkey.starts_with("customfield_");
+        if !show {
+            continue;
+        }
+        let is_select = f.has_options();
+        let options: Vec<SharedString> = f.allowed_values.iter().map(|a| a.label().into()).collect();
+        let (init_id, init_label) = prefill_field(&fkey, &f, issue, is_select);
+        rows.push(FieldRow {
+            name: f.name.clone().into(),
+            options: ModelRc::new(VecModel::from(options)),
+            is_select,
+            value: init_label.into(),
+        });
+        pfields.push(PField { key: fkey, field: f, value: init_id, touched: false });
+    }
+    if pfields.is_empty() {
+        ui.set_error("No editable fields for this issue.".into());
+        return;
+    }
+    PENDING.with(|p| *p.borrow_mut() = Some(Pending { kind: PendingKind::Edit, key: key.clone(), fields: pfields }));
+    ui.set_dialog_title(format!("Edit {key}").into());
+    ui.set_dialog_fields(ModelRc::new(VecModel::from(rows)));
+    ui.set_dialog_open(true);
+}
+
+/// Prefill an edit field from the issue's current values where we can.
+fn prefill_field(fkey: &str, f: &TransitionField, issue: &Issue, is_select: bool) -> (String, String) {
+    match fkey {
+        "summary" => (issue.summary().to_string(), issue.summary().to_string()),
+        "duedate" => {
+            let d = issue.fields.duedate.clone().unwrap_or_default();
+            (d.clone(), d)
+        }
+        "priority" if is_select => f
+            .allowed_values
+            .iter()
+            .find(|a| a.label() == issue.priority())
+            .or_else(|| f.allowed_values.first())
+            .map(|a| (a.id.clone(), a.label().to_string()))
+            .unwrap_or_default(),
+        _ if is_select => f.allowed_values.first().map(|a| (a.id.clone(), a.label().to_string())).unwrap_or_default(),
+        _ => (String::new(), String::new()),
+    }
 }
 
 fn to_row(i: &Issue) -> IssueRow {
