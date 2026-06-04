@@ -2,7 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use lient_core::client::transition_field_json;
-use lient_core::model::{AllowedValue, Comment, Issue, Transition, TransitionField, User};
+use lient_core::model::{AllowedValue, Comment, CreateOption, Issue, Transition, TransitionField, User};
 use lient_core::{Auth, Jira, JiraClient, JiraConfig, MockJira};
 use slint::{ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -32,6 +32,9 @@ type JiraCell = Rc<RefCell<Arc<dyn Jira>>>;
 thread_local! {
     static TRANSITIONS: RefCell<Vec<Transition>> = const { RefCell::new(Vec::new()) };
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
+    /// Cached create options (project × type + required fields) for the New-issue
+    /// dialog, so changing the project/type rebuilds its required fields instantly.
+    static CREATE_OPTS: RefCell<Vec<CreateOption>> = const { RefCell::new(Vec::new()) };
 }
 
 /// What the shared field dialog will do on submit.
@@ -139,20 +142,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     {
+        let ui_w = ui.as_weak();
         ui.on_field_changed(move |i, value| {
-            PENDING.with(|p| {
-                if let Some(pend) = p.borrow_mut().as_mut() {
-                    if let Some(pf) = pend.fields.get_mut(i as usize) {
-                        // pick-lists report the chosen label → map back to its id
-                        pf.value = if pf.field.has_options() {
-                            pf.field.allowed_values.iter().find(|a| a.label() == value.as_str()).map(|a| a.id.clone()).unwrap_or_else(|| value.to_string())
-                        } else {
-                            value.to_string()
-                        };
-                        pf.touched = true;
-                    }
+            // returns (combo_id, summary, desc) when a Create-mode project/type
+            // change requires rebuilding the dialog's required fields.
+            let rebuild = PENDING.with(|p| {
+                let mut pend = p.borrow_mut();
+                let Some(pend) = pend.as_mut() else { return None };
+                if let Some(pf) = pend.fields.get_mut(i as usize) {
+                    pf.value = if pf.field.has_options() {
+                        pf.field.allowed_values.iter().find(|a| a.label() == value.as_str()).map(|a| a.id.clone()).unwrap_or_else(|| value.to_string())
+                    } else {
+                        value.to_string()
+                    };
+                    pf.touched = true;
+                }
+                if matches!(pend.kind, PendingKind::Create) && pend.fields.get(i as usize).map(|f| f.key.as_str()) == Some("__projtype") {
+                    let combo = pend.fields[i as usize].value.clone();
+                    let get = |k: &str| pend.fields.iter().find(|f| f.key == k).map(|f| f.value.clone()).unwrap_or_default();
+                    Some((combo, get("summary"), get("description")))
+                } else {
+                    None
                 }
             });
+            if let Some((combo, summary, desc)) = rebuild {
+                build_create_dialog(&ui_w.unwrap(), &combo, &summary, &desc);
+            }
         });
     }
     {
@@ -218,6 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 PendingKind::Create => {
                     let (mut project, mut itype, mut summary, mut desc) = (String::new(), String::new(), String::new(), String::new());
+                    let mut extra = serde_json::Map::new();
                     for pf in &pend.fields {
                         match pf.key.as_str() {
                             "__projtype" => {
@@ -227,6 +243,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             "summary" => summary = pf.value.clone(),
                             "description" => desc = pf.value.clone(),
+                            // a required create field
+                            other if !pf.value.is_empty() => {
+                                extra.insert(other.to_string(), transition_field_json(&pf.field, &pf.value));
+                            }
                             _ => {}
                         }
                     }
@@ -240,7 +260,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         jira.clone(),
                         move |j| {
                             let d = if desc.trim().is_empty() { None } else { Some(desc.as_str()) };
-                            j.create_issue(&project, &itype, &summary, d, serde_json::Value::Null)
+                            j.create_issue(&project, &itype, &summary, d, serde_json::Value::Object(extra))
                         },
                         move |ui, key| {
                             load_list(&ui, jira.clone());
@@ -284,7 +304,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.on_new_issue(move || {
             let ui = ui_w.unwrap();
             let jira = cell.borrow().clone();
-            run(&ui, jira, |j| j.create_targets(), |ui, targets| open_create_dialog(&ui, targets));
+            run(&ui, jira, |j| j.create_targets(), |ui, opts| {
+                CREATE_OPTS.with(|c| *c.borrow_mut() = opts);
+                build_create_dialog(&ui, "", "", "");
+            });
         });
     }
     {
@@ -366,6 +389,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|(id, label)| PaletteItem { id: (*id).into(), label: (*label).into() })
                 .collect();
             ui.set_palette_items(ModelRc::new(VecModel::from(items)));
+            ui.set_palette_selected(0);
         });
     }
     {
@@ -456,12 +480,25 @@ fn load_me(ui: &AppWindow, jira: Arc<dyn Jira>) {
 
 fn load_list(ui: &AppWindow, jira: Arc<dyn Jira>) {
     ui.set_loading(true);
-    run(ui, jira, |j| j.my_issues(100), |ui, issues| {
-        ui.set_loading(false);
-        ui.set_error("".into());
-        let rows: Vec<IssueRow> = issues.iter().map(to_row).collect();
-        ui.set_issues(ModelRc::new(VecModel::from(rows)));
-    });
+    let inbox = ui.get_inbox_mode();
+    run(
+        ui,
+        jira,
+        move |j| {
+            if inbox {
+                // "needs attention": assigned to me, changed recently, freshest first
+                Ok(j.search("assignee = currentUser() AND updated >= -7d ORDER BY updated DESC", 100)?.issues)
+            } else {
+                j.my_issues(100)
+            }
+        },
+        |ui, issues| {
+            ui.set_loading(false);
+            ui.set_error("".into());
+            let rows: Vec<IssueRow> = issues.iter().map(to_row).collect();
+            ui.set_issues(ModelRc::new(VecModel::from(rows)));
+        },
+    );
 }
 
 fn load_detail(ui: &AppWindow, jira: Arc<dyn Jira>, key: String) {
@@ -560,36 +597,57 @@ fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionF
     ui.set_dialog_open(true);
 }
 
-/// Build and open the "New issue" dialog from the available project/type targets.
-fn open_create_dialog(ui: &AppWindow, targets: Vec<(String, String, String)>) {
-    if targets.is_empty() {
-        ui.set_error("No projects available to create issues in.".into());
-        return;
-    }
-    // one pick-list entry per (project, type), id encodes "PROJKEY|Type"
-    let combos: Vec<AllowedValue> = targets
-        .iter()
-        .map(|(pk, pn, ty)| AllowedValue { id: format!("{pk}|{ty}"), name: format!("{pn} ({pk}) — {ty}"), value: String::new() })
-        .collect();
-    let labels: Vec<SharedString> = combos.iter().map(|a| a.label().into()).collect();
-    let first_label = combos.first().map(|a| a.label().to_string()).unwrap_or_default();
-    let first_id = combos.first().map(|a| a.id.clone()).unwrap_or_default();
-    let empty = || ModelRc::new(VecModel::from(Vec::<SharedString>::new()));
+/// Build (or rebuild) the "New issue" dialog from the cached create options for
+/// the given project/type combo, preserving the typed summary/description. Adds
+/// the selected combo's required fields as editable rows.
+fn build_create_dialog(ui: &AppWindow, selected_id: &str, summary: &str, description: &str) {
+    CREATE_OPTS.with(|opts| {
+        let opts = opts.borrow();
+        if opts.is_empty() {
+            ui.set_error("No projects available to create issues in.".into());
+            return;
+        }
+        let combo_id = |o: &CreateOption| format!("{}|{}", o.project_key, o.type_name);
+        let combos: Vec<AllowedValue> = opts
+            .iter()
+            .map(|o| AllowedValue { id: combo_id(o), name: format!("{} ({}) — {}", o.project_name, o.project_key, o.type_name), value: String::new() })
+            .collect();
+        let sel_id = if selected_id.is_empty() { combos.first().map(|a| a.id.clone()).unwrap_or_default() } else { selected_id.to_string() };
+        let sel_label = combos.iter().find(|a| a.id == sel_id).map(|a| a.label().to_string()).unwrap_or_default();
+        let empty = || ModelRc::new(VecModel::from(Vec::<SharedString>::new()));
 
-    let rows = vec![
-        FieldRow { name: "Project / Type".into(), options: ModelRc::new(VecModel::from(labels)), is_select: true, value: first_label.into() },
-        FieldRow { name: "Summary".into(), options: empty(), is_select: false, value: "".into() },
-        FieldRow { name: "Description".into(), options: empty(), is_select: false, value: "".into() },
-    ];
-    let pfields = vec![
-        PField { key: "__projtype".into(), field: TransitionField { name: "Project / Type".into(), allowed_values: combos, ..Default::default() }, value: first_id, touched: true },
-        PField { key: "summary".into(), field: TransitionField::default(), value: String::new(), touched: false },
-        PField { key: "description".into(), field: TransitionField::default(), value: String::new(), touched: false },
-    ];
-    PENDING.with(|p| *p.borrow_mut() = Some(Pending { kind: PendingKind::Create, key: String::new(), fields: pfields }));
-    ui.set_dialog_title("New issue".into());
-    ui.set_dialog_fields(ModelRc::new(VecModel::from(rows)));
-    ui.set_dialog_open(true);
+        let mut rows: Vec<FieldRow> = Vec::new();
+        let mut pfields: Vec<PField> = Vec::new();
+
+        let labels: Vec<SharedString> = combos.iter().map(|a| a.label().into()).collect();
+        rows.push(FieldRow { name: "Project / Type".into(), options: ModelRc::new(VecModel::from(labels)), is_select: true, value: sel_label.into() });
+        pfields.push(PField { key: "__projtype".into(), field: TransitionField { name: "Project / Type".into(), allowed_values: combos.clone(), ..Default::default() }, value: sel_id.clone(), touched: true });
+
+        rows.push(FieldRow { name: "Summary".into(), options: empty(), is_select: false, value: summary.into() });
+        pfields.push(PField { key: "summary".into(), field: TransitionField::default(), value: summary.to_string(), touched: false });
+        rows.push(FieldRow { name: "Description".into(), options: empty(), is_select: false, value: description.into() });
+        pfields.push(PField { key: "description".into(), field: TransitionField::default(), value: description.to_string(), touched: false });
+
+        // the selected combo's required fields
+        if let Some(o) = opts.iter().find(|o| combo_id(o) == sel_id) {
+            for (fkey, f) in &o.required {
+                let is_select = f.has_options();
+                let opt_labels: Vec<SharedString> = f.allowed_values.iter().map(|a| a.label().into()).collect();
+                let (init_id, init_label) = if is_select {
+                    f.allowed_values.first().map(|a| (a.id.clone(), a.label().to_string())).unwrap_or_default()
+                } else {
+                    (String::new(), String::new())
+                };
+                rows.push(FieldRow { name: format!("{} *", f.name).into(), options: ModelRc::new(VecModel::from(opt_labels)), is_select, value: init_label.into() });
+                pfields.push(PField { key: fkey.clone(), field: f.clone(), value: init_id, touched: false });
+            }
+        }
+
+        PENDING.with(|p| *p.borrow_mut() = Some(Pending { kind: PendingKind::Create, key: String::new(), fields: pfields }));
+        ui.set_dialog_title("New issue".into());
+        ui.set_dialog_fields(ModelRc::new(VecModel::from(rows)));
+        ui.set_dialog_open(true);
+    });
 }
 
 /// Prefill an edit field from the issue's current values where we can.

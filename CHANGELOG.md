@@ -6,11 +6,22 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Arrow-key navigation in lists / palette (Enter + click work today).
-- Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" flow (routing is done;
-  the browser + loopback exchange is pending).
-- Notification inbox, local cache / offline.
+- Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" — needs a registered
+  Atlassian OAuth app (client id) + Windows verification.
+- Local cache / offline.
 - Edit dialog: prefilling current custom-field values.
+
+## [0.1.7] - 2026-06-04
+
+### Added
+- **Arrow-key palette navigation** — Up/Down move the highlight, Enter runs the
+  highlighted command (click still works).
+- **Dynamic required fields on Create** — the New-issue dialog now renders the
+  selected project/type's required fields (e.g. a required custom select), and
+  rebuilds them instantly when you change the project/type. Createmeta is fetched
+  with fields and cached.
+- **Inbox view** — a *My Work / Inbox* toggle; Inbox shows issues assigned to you
+  updated in the last 7 days (recent activity / needs-attention), freshest first.
 
 ## [0.1.6] - 2026-06-04
 

@@ -184,8 +184,8 @@ pub struct EditMeta {
     pub fields: std::collections::BTreeMap<String, TransitionField>,
 }
 
-/// `/issue/createmeta?expand=projects.issuetypes` — the projects you can create
-/// in and the issue types each offers.
+/// `/issue/createmeta?expand=projects.issuetypes.fields` — the projects you can
+/// create in, the issue types each offers, and the fields each type requires.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct CreateMeta {
     #[serde(default)]
@@ -199,7 +199,27 @@ pub struct CreateProject {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub issuetypes: Vec<NamedRef>,
+    pub issuetypes: Vec<CreateIssueType>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CreateIssueType {
+    #[serde(default)]
+    pub name: String,
+    /// Field metadata (same shape as transition fields); present with the
+    /// `projects.issuetypes.fields` expand.
+    #[serde(default)]
+    pub fields: std::collections::BTreeMap<String, TransitionField>,
+}
+
+/// A flattened create target: one project × issue type, with its required fields
+/// (excluding the ones the dialog always handles: project / type / summary).
+#[derive(Debug, Clone, Default)]
+pub struct CreateOption {
+    pub project_key: String,
+    pub project_name: String,
+    pub type_name: String,
+    pub required: Vec<(String, TransitionField)>,
 }
 
 #[cfg(test)]

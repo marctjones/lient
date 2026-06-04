@@ -148,12 +148,29 @@ impl Jira for MockJira {
         Ok(())
     }
 
-    fn create_targets(&self) -> Result<Vec<(String, String, String)>> {
+    fn create_targets(&self) -> Result<Vec<CreateOption>> {
+        let opt = |pk: &str, pn: &str, ty: &str, required: Vec<(String, TransitionField)>| CreateOption {
+            project_key: pk.into(),
+            project_name: pn.into(),
+            type_name: ty.into(),
+            required,
+        };
+        // "Matter" requires a Practice-area pick-list, to exercise dynamic fields.
+        let practice = TransitionField {
+            required: true,
+            name: "Practice area".into(),
+            schema: FieldSchema { type_: "option".into(), items: String::new() },
+            allowed_values: vec![
+                AllowedValue { id: "300".into(), name: "Corporate".into(), value: String::new() },
+                AllowedValue { id: "301".into(), name: "Litigation".into(), value: String::new() },
+                AllowedValue { id: "302".into(), name: "IP".into(), value: String::new() },
+            ],
+        };
         Ok(vec![
-            ("ACME".into(), "Acme Legal".into(), "Task".into()),
-            ("ACME".into(), "Acme Legal".into(), "Matter".into()),
-            ("ACME".into(), "Acme Legal".into(), "Bug".into()),
-            ("OPS".into(), "Operations".into(), "Task".into()),
+            opt("ACME", "Acme Legal", "Task", vec![]),
+            opt("ACME", "Acme Legal", "Matter", vec![("customfield_20000".into(), practice)]),
+            opt("ACME", "Acme Legal", "Bug", vec![]),
+            opt("OPS", "Operations", "Task", vec![]),
         ])
     }
 

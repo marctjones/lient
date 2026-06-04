@@ -69,16 +69,26 @@ impl JiraClient {
         Ok(resp.transitions)
     }
 
-    /// Projects you can create in, each flattened to one (projectKey, projectName,
-    /// issueType) entry per type — for the "New issue" project/type picker.
-    pub fn create_targets(&self) -> Result<Vec<(String, String, String)>> {
+    /// Projects × issue types you can create in, each with its required fields
+    /// (for the "New issue" dialog). One createmeta call, fields included.
+    pub fn create_targets(&self) -> Result<Vec<crate::model::CreateOption>> {
         let url = self.cfg.api_url("issue/createmeta");
-        let body = self.get(&url).query("expand", "projects.issuetypes").call_text()?;
+        let body = self.get(&url).query("expand", "projects.issuetypes.fields").call_text()?;
         let meta: crate::model::CreateMeta = serde_json::from_str(&body)?;
         let mut out = Vec::new();
         for p in meta.projects {
             for t in p.issuetypes {
-                out.push((p.key.clone(), p.name.clone(), t.name));
+                let required: Vec<(String, crate::model::TransitionField)> = t
+                    .fields
+                    .into_iter()
+                    .filter(|(k, f)| f.required && !matches!(k.as_str(), "summary" | "project" | "issuetype" | "description" | "reporter"))
+                    .collect();
+                out.push(crate::model::CreateOption {
+                    project_key: p.key.clone(),
+                    project_name: p.name.clone(),
+                    type_name: t.name,
+                    required,
+                });
             }
         }
         Ok(out)

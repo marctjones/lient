@@ -5,7 +5,7 @@
 //! Object-safe and `Send + Sync` so the GUI can run calls on worker threads.
 
 use crate::client::JiraClient;
-use crate::model::{Comment, Issue, SearchResult, Transition, TransitionField, User};
+use crate::model::{Comment, CreateOption, Issue, SearchResult, Transition, TransitionField, User};
 use anyhow::Result;
 use serde_json::Value;
 
@@ -16,8 +16,8 @@ pub trait Jira: Send + Sync {
     fn issue(&self, key: &str) -> Result<Issue>;
     fn transitions(&self, key: &str) -> Result<Vec<Transition>>;
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()>;
-    /// Projects × issue types you can create in (projectKey, projectName, type).
-    fn create_targets(&self) -> Result<Vec<(String, String, String)>>;
+    /// Projects × issue types you can create in, with each type's required fields.
+    fn create_targets(&self) -> Result<Vec<CreateOption>>;
     /// Users who can be assigned this issue (for the assignee picker).
     fn assignable_users(&self, key: &str) -> Result<Vec<User>>;
     /// Fields editable on this issue (standard + custom), with their metadata.
@@ -60,7 +60,7 @@ impl Jira for JiraClient {
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()> {
         JiraClient::transition(self, key, transition_id, fields)
     }
-    fn create_targets(&self) -> Result<Vec<(String, String, String)>> {
+    fn create_targets(&self) -> Result<Vec<CreateOption>> {
         JiraClient::create_targets(self)
     }
     fn assignable_users(&self, key: &str) -> Result<Vec<User>> {
