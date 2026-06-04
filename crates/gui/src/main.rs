@@ -201,6 +201,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ui_w = ui.as_weak();
         ui.on_show_login(move || ui_w.unwrap().set_view("login".into()));
     }
+    ui.on_quit(|| {
+        let _ = slint::quit_event_loop();
+    });
+    ui.on_open_url(|url| {
+        let _ = open::that(url.as_str());
+    });
 
     // ---- initial load ----------------------------------------------------
     if view == "main" {

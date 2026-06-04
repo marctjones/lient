@@ -28,6 +28,60 @@ component Seg inherits Rectangle {
     t := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
+// ---- menu-bar components (in-window overlays: instant open + hover-switch) ----
+component MenuItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <string> shortcut;
+    callback clicked;
+    height: 30px;
+    border-radius: 5px;
+    background: mt.has-hover ? #e8f0fe : transparent;
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 11px;
+        spacing: 9px;
+        Text { text: root.icon; width: 15px; font-size: 12.5px; color: #79838d; horizontal-alignment: center; vertical-alignment: center; }
+        Text { text: root.label; font-size: 12.5px; color: #1b2a3a; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.shortcut; font-size: 11px; color: #8a96a3; vertical-alignment: center; }
+    }
+    mt := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+component MenuSep inherits Rectangle {
+    height: 7px;
+    Rectangle { height: 1px; y: 3px; background: #e3e6ea; }
+}
+component MenuPanel inherits Rectangle {
+    background: white;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: #e3e6ea;
+    drop-shadow-blur: 18px;
+    drop-shadow-color: #00000026;
+    height: content.preferred-height;
+    TouchArea {}
+    content := VerticalLayout { padding: 5px; @children }
+}
+component MenuTitle inherits Rectangle {
+    in property <string> label;
+    in property <string> menu-id;
+    in-out property <string> open-menu;
+    width: txt.preferred-width + 22px;
+    height: 24px;
+    border-radius: 5px;
+    background: (open-menu == menu-id) ? #e8f0fe : (mta.has-hover ? #eef0f3 : transparent);
+    txt := Text { text: root.label; font-size: 12.5px; color: (open-menu == menu-id) ? #2d6cdf : #33414f; horizontal-alignment: center; vertical-alignment: center; }
+    mta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { open-menu = (open-menu == menu-id) ? "" : menu-id; }
+        changed has-hover => {
+            if (self.has-hover && open-menu != "" && open-menu != menu-id) {
+                open-menu = menu-id;
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Lient";
     preferred-width: 1040px;
@@ -37,6 +91,7 @@ export component AppWindow inherits Window {
 
     // view state
     in-out property <string> view: "main"; // "login" | "main"
+    in-out property <string> open-menu: ""; // which menu-bar dropdown is open
 
     // main-view data
     in property <string> me;
@@ -81,6 +136,8 @@ export component AppWindow inherits Window {
     callback test-connection();
     callback save-login();
     callback show-login();
+    callback quit();
+    callback open-url(string);
 
     // ===================== LOGIN WIZARD =====================
     if root.view == "login": Rectangle {
@@ -141,9 +198,26 @@ export component AppWindow inherits Window {
     }
 
     // ===================== MAIN =====================
-    if root.view == "main": VerticalBox {
+    if root.view == "main": Rectangle {
+      VerticalBox {
         padding: 0px;
         spacing: 0px;
+
+        // menu bar
+        Rectangle {
+            height: 30px;
+            background: #f1f3f6;
+            Rectangle { y: parent.height - 1px; height: 1px; background: #e3e6ea; }
+            HorizontalLayout {
+                alignment: start;
+                padding-left: 6px;
+                padding-top: 3px;
+                spacing: 2px;
+                fileTitle := MenuTitle { label: "File"; menu-id: "file"; open-menu <=> root.open-menu; }
+                issueTitle := MenuTitle { label: "Issue"; menu-id: "issue"; open-menu <=> root.open-menu; }
+                helpTitle := MenuTitle { label: "Help"; menu-id: "help"; open-menu <=> root.open-menu; }
+            }
+        }
 
         Rectangle {
             height: 46px;
@@ -241,6 +315,35 @@ export component AppWindow inherits Window {
                 }
             }
         }
+      }
+
+      // menu-bar dropdowns — in the same scope as the titles, drawn on top of the body
+      if root.open-menu != "": TouchArea {
+          x: 0; y: 30px; width: root.width; height: root.height - 30px;
+          clicked => { root.open-menu = ""; }
+      }
+      if root.open-menu == "file": MenuPanel {
+          x: fileTitle.absolute-position.x;
+          y: fileTitle.absolute-position.y + fileTitle.height + 3px;
+          width: 210px;
+          MenuItem { icon: "↻"; label: "Refresh"; clicked => { root.open-menu = ""; root.refresh(); } }
+          MenuSep {}
+          MenuItem { icon: "@"; label: "Account…"; clicked => { root.open-menu = ""; root.show-login(); } }
+          MenuItem { icon: "⏻"; label: "Quit"; clicked => { root.open-menu = ""; root.quit(); } }
+      }
+      if root.open-menu == "issue": MenuPanel {
+          x: issueTitle.absolute-position.x;
+          y: issueTitle.absolute-position.y + issueTitle.height + 3px;
+          width: 230px;
+          MenuItem { icon: "↗"; label: "Open in browser"; clicked => { root.open-menu = ""; root.open-browser(root.selected-key); } }
+      }
+      if root.open-menu == "help": MenuPanel {
+          x: helpTitle.absolute-position.x;
+          y: helpTitle.absolute-position.y + helpTitle.height + 3px;
+          width: 250px;
+          MenuItem { icon: "⚷"; label: "Get a Jira API token ↗"; clicked => { root.open-menu = ""; root.open-url("https://id.atlassian.com/manage-profile/security/api-tokens"); } }
+          MenuItem { icon: "↗"; label: "Lient on GitHub"; clicked => { root.open-menu = ""; root.open-url("https://github.com/marctjones/lient"); } }
+      }
     }
 
     // ===================== TRANSITION REQUIRED-FIELD DIALOG =====================
@@ -283,4 +386,5 @@ export component AppWindow inherits Window {
             }
         }
     }
+
 }
