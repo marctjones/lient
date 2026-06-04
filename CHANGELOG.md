@@ -6,10 +6,24 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" — needs a registered
-  Atlassian OAuth app (client id) + Windows verification.
 - Local cache / offline.
 - Edit dialog: prefilling current custom-field values.
+- OAuth token auto-refresh on expiry.
+
+## [0.1.8] - 2026-06-04
+
+### Added
+- **Sign in with Atlassian (OAuth 2.0 / 3LO)** — a Cloud login method using PKCE
+  + a loopback redirect (no client secret needed for a public desktop client).
+  Pick *Sign in (OAuth)* in the login wizard, paste your **OAuth client id**
+  (one-time app registration at developer.atlassian.com), click Sign in → the
+  browser opens for consent → Lient captures the redirect, exchanges the code,
+  discovers your site (cloud id) and signs you in. The PKCE/URL/redirect-parsing
+  logic is unit-tested; the live token exchange runs against Atlassian.
+
+> Requires a registered Atlassian OAuth 2.0 app (client id) and is verified on
+> Windows/your machine — the maintainer can't exercise the live token exchange
+> from CI. API-token / PAT login remain the zero-setup options.
 
 ## [0.1.7] - 2026-06-04
 

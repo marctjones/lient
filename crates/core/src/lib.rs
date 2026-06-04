@@ -10,6 +10,7 @@ pub mod client;
 pub mod config;
 pub mod mock;
 pub mod model;
+pub mod oauth;
 
 pub use api::Jira;
 pub use client::JiraClient;

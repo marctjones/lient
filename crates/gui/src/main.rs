@@ -35,6 +35,9 @@ thread_local! {
     /// Cached create options (project × type + required fields) for the New-issue
     /// dialog, so changing the project/type rebuilds its required fields instantly.
     static CREATE_OPTS: RefCell<Vec<CreateOption>> = const { RefCell::new(Vec::new()) };
+    /// Result of an OAuth login, handed from the worker thread to the UI thread
+    /// (the worker can't touch the Rc-held client cell).
+    static PENDING_OAUTH: RefCell<Option<JiraConfig>> = const { RefCell::new(None) };
 }
 
 /// What the shared field dialog will do on submit.
@@ -369,6 +372,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let ui_w = ui.as_weak();
         ui.on_show_login(move || ui_w.unwrap().set_view("login".into()));
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_oauth_login(move || {
+            let ui = ui_w.unwrap();
+            let client = ui.get_login_oauth_client().trim().to_string();
+            if client.is_empty() {
+                ui.set_test_status("✗ Enter your OAuth client id".into());
+                return;
+            }
+            let secret = ui.get_login_oauth_secret().trim().to_string();
+            ui.set_testing(true);
+            ui.set_test_status("opening browser — authorize in Atlassian…".into());
+            let w = ui.as_weak();
+            // The worker can't hold the Rc client cell, so on success it stashes the
+            // config in a thread-local and fires `oauth-finished` (handled below).
+            std::thread::spawn(move || {
+                let res = lient_core::oauth::login(&client, if secret.is_empty() { None } else { Some(&secret) });
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = w.upgrade() else { return };
+                    ui.set_testing(false);
+                    match res {
+                        Ok(cfg) => {
+                            PENDING_OAUTH.with(|p| *p.borrow_mut() = Some(cfg));
+                            ui.invoke_oauth_finished();
+                        }
+                        Err(e) => ui.set_test_status(format!("✗ {e:#}").into()),
+                    }
+                });
+            });
+        });
+    }
+    {
+        let (ui_w, cell) = (ui.as_weak(), cell.clone());
+        ui.on_oauth_finished(move || {
+            let ui = ui_w.unwrap();
+            if let Some(cfg) = PENDING_OAUTH.with(|p| p.borrow_mut().take()) {
+                let _ = cfg.save();
+                *cell.borrow_mut() = Arc::new(JiraClient::new(cfg));
+                ui.set_demo(false);
+                ui.set_test_status("".into());
+                ui.set_view("main".into());
+                let jira = cell.borrow().clone();
+                load_me(&ui, jira.clone());
+                load_list(&ui, jira);
+            }
+        });
     }
     ui.on_quit(|| {
         let _ = slint::quit_event_loop();

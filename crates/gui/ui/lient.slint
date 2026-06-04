@@ -126,6 +126,8 @@ export component AppWindow inherits Window {
     in-out property <string> login-username;
     in-out property <string> login-password;
     in-out property <string> login-raw;
+    in-out property <string> login-oauth-client;
+    in-out property <string> login-oauth-secret;
     in-out property <string> test-status;
     in property <bool> testing;
 
@@ -146,6 +148,8 @@ export component AppWindow inherits Window {
     callback open-browser(string);
     callback test-connection();
     callback save-login();
+    callback oauth-login();
+    callback oauth-finished();
     callback show-login();
     callback quit();
     callback open-url(string);
@@ -212,6 +216,7 @@ export component AppWindow inherits Window {
                 Text { text: "SIGN-IN METHOD"; font-size: 10px; letter-spacing: 1px; color: #8a96a3; }
                 HorizontalLayout {
                     spacing: 6px;
+                    if root.login-deployment == "cloud": Seg { label: "Sign in (OAuth)"; active: root.login-method == "oauth"; clicked => { root.login-method = "oauth"; } }
                     if root.login-deployment == "cloud": Seg { label: "API token"; active: root.login-method == "token"; clicked => { root.login-method = "token"; } }
                     if root.login-deployment == "server": Seg { label: "PAT"; active: root.login-method == "pat"; clicked => { root.login-method = "pat"; } }
                     if root.login-deployment == "server": Seg { label: "User + Password"; active: root.login-method == "password"; clicked => { root.login-method = "password"; } }
@@ -219,7 +224,9 @@ export component AppWindow inherits Window {
                     Rectangle { horizontal-stretch: 1; }
                 }
 
-                LineEdit { placeholder-text: "Site URL  —  https://you.atlassian.net"; text <=> root.login-url; }
+                if root.login-method != "oauth": LineEdit { placeholder-text: "Site URL  —  https://you.atlassian.net"; text <=> root.login-url; }
+                if root.login-method == "oauth": LineEdit { placeholder-text: "OAuth client id  (from developer.atlassian.com)"; text <=> root.login-oauth-client; }
+                if root.login-method == "oauth": LineEdit { placeholder-text: "Client secret  (only if your app requires one)"; input-type: InputType.password; text <=> root.login-oauth-secret; }
                 if root.login-method == "token": LineEdit { placeholder-text: "Email"; text <=> root.login-email; }
                 if root.login-method == "token": LineEdit { placeholder-text: "API token"; input-type: InputType.password; text <=> root.login-token; }
                 if root.login-method == "pat": LineEdit { placeholder-text: "Personal Access Token"; input-type: InputType.password; text <=> root.login-token; }
@@ -227,7 +234,12 @@ export component AppWindow inherits Window {
                 if root.login-method == "password": LineEdit { placeholder-text: "Password"; input-type: InputType.password; text <=> root.login-password; }
                 if root.login-method == "raw": LineEdit { placeholder-text: "Authorization: Bearer ..."; text <=> root.login-raw; }
 
-                HorizontalLayout {
+                if root.login-method == "oauth": HorizontalLayout {
+                    spacing: 8px;
+                    Button { text: root.testing ? "Waiting for browser…" : "Sign in with Atlassian"; primary: true; enabled: !root.testing; clicked => { root.oauth-login(); } }
+                    Text { text: root.test-status; font-size: 12px; color: #59636e; vertical-alignment: center; }
+                }
+                if root.login-method != "oauth": HorizontalLayout {
                     spacing: 8px;
                     Button { text: root.testing ? "Testing…" : "Test connection"; enabled: !root.testing; clicked => { root.test-connection(); } }
                     Text { text: root.test-status; font-size: 12px; color: #59636e; vertical-alignment: center; }
@@ -236,7 +248,7 @@ export component AppWindow inherits Window {
                     spacing: 8px;
                     Button { text: "Use demo data"; clicked => { root.demo = true; root.view = "main"; root.refresh(); } }
                     Rectangle { horizontal-stretch: 1; }
-                    Button { text: "Save & continue"; primary: true; clicked => { root.save-login(); } }
+                    if root.login-method != "oauth": Button { text: "Save & continue"; primary: true; clicked => { root.save-login(); } }
                 }
             }
         }
