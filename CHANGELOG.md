@@ -6,11 +6,20 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Assign / create issue in the GUI (already in `lient-core` + CLI).
+- Create issue in the GUI (already in `lient-core` + CLI).
 - Interactive OAuth 2.0 (3LO) "Sign in with Atlassian" flow (routing is done;
   the browser + loopback exchange is pending).
 - Command palette, notification inbox, local cache / offline.
-- Edit dialog: labels/assignee fields + prefilling current custom-field values.
+- Edit dialog: labels field + prefilling current custom-field values.
+- JSM public "reply to requestor" (servicedeskapi).
+
+## [0.1.3] - 2026-06-04
+
+### Added
+- **Assignee in the Edit dialog** — a dropdown of assignable users (from
+  `/user/assignable/search`), prefilled with the current assignee; saving routes
+  through the dedicated `/assignee` endpoint (correct Cloud `accountId` / Server
+  `name` shape). Core adds `assignable_users`.
 
 ## [0.1.2] - 2026-06-04
 
