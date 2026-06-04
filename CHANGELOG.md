@@ -11,6 +11,16 @@ SemVer (pre-1.0: minor = features, patch = fixes).
   the browser + loopback exchange is pending).
 - Command palette, notification inbox, local cache / offline.
 
+## [0.1.1] - 2026-06-04
+
+### Added
+- **Transition required-field dialog** — transitions that need fields (e.g.
+  *Done* → *Resolution*) now open a dialog that renders each required field as a
+  dropdown (for pick-lists, from `allowedValues`) or a text box, and submits the
+  correct JSON. Core captures the field schema + allowed values.
+- **Menu bar** (File / Issue / Help) — in-window overlay menus with instant open
+  and hover-to-switch; Refresh, Account, Quit, Open-in-browser, and help links.
+
 ## [0.1.0] - 2026-06-04
 
 First tagged release — a working personal Jira daily-driver foundation.
