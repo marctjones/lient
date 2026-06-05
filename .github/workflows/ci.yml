@@ -28,7 +28,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - name: Build
         run: cargo build --workspace --verbose
-      - name: Test core
-        run: cargo test -p lient-core --verbose
+      - name: Test (core + GUI)
+        run: cargo test --workspace --verbose
       - name: Clippy (core)
         run: cargo clippy -p lient-core -- -D warnings
