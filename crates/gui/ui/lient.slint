@@ -99,6 +99,7 @@ export component AppWindow inherits Window {
     in-out property <string> palette-query;
     in property <[PaletteItem]> palette-items;
     in-out property <int> palette-selected: 0;
+    in-out property <int> list-selected: -1; // keyboard cursor in the issue list
 
     // main-view data
     in property <string> me;
@@ -179,6 +180,24 @@ export component AppWindow inherits Window {
             if (root.palette-open && e.text == Key.DownArrow) {
                 root.palette-selected = min(root.palette-items.length - 1, root.palette-selected + 1);
                 return EventResult.accept;
+            }
+            // main-list keyboard nav + single-key shortcuts (only when no overlay
+            // is open and no text field has focus — letters reach here only then).
+            if (!root.palette-open && !root.dialog-open && root.view == "main") {
+                if (e.text == Key.DownArrow && root.issues.length > 0) {
+                    root.list-selected = min(root.issues.length - 1, root.list-selected + 1);
+                    root.select(root.issues[root.list-selected].key);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.UpArrow && root.issues.length > 0) {
+                    root.list-selected = max(0, root.list-selected - 1);
+                    root.select(root.issues[root.list-selected].key);
+                    return EventResult.accept;
+                }
+                if (e.text == "r") { root.refresh(); return EventResult.accept; }
+                if (e.text == "n") { root.new-issue(); return EventResult.accept; }
+                if (e.text == "e" && root.selected-key != "") { root.edit-issue(root.selected-key); return EventResult.accept; }
+                if (e.text == "o" && root.selected-key != "") { root.open-browser(root.selected-key); return EventResult.accept; }
             }
             if (e.text == Key.Escape) {
                 if (root.palette-open) { root.palette-open = false; return EventResult.accept; }
@@ -308,7 +327,7 @@ export component AppWindow inherits Window {
                 background: white;
                 Rectangle { x: parent.width - 1px; width: 1px; background: #e3e6ea; }
                 ListView {
-                    for it in root.issues: Rectangle {
+                    for it[i] in root.issues: Rectangle {
                         height: 60px;
                         background: it.key == root.selected-key ? #e8f0fe : (ta.has-hover ? #f2f4f7 : white);
                         VerticalLayout {
@@ -323,7 +342,7 @@ export component AppWindow inherits Window {
                             }
                             Text { text: it.summary; color: #1b2a3a; overflow: elide; }
                         }
-                        ta := TouchArea { mouse-cursor: pointer; clicked => { root.select(it.key); } }
+                        ta := TouchArea { mouse-cursor: pointer; clicked => { root.list-selected = i; root.select(it.key); } }
                     }
                 }
             }

@@ -9,6 +9,15 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 - Edit dialog: prefilling current custom-field values.
 - More GUI automation tests (simulated clicks / element queries).
 
+## [0.1.10] - 2026-06-04
+
+### Added
+- **Keyboard navigation in the issue list** — ↑/↓ move a cursor through My Work /
+  Inbox and open each issue's detail (click still syncs the cursor).
+- **Single-key shortcuts** (when no overlay is open and you're not typing):
+  **r** refresh · **n** new issue · **e** edit selected · **o** open selected in
+  browser. (Letters only fire when no text field has focus.)
+
 ## [0.1.9] - 2026-06-04
 
 ### Added
