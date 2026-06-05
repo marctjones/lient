@@ -7,6 +7,16 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 
 ### In progress
 - More GUI automation tests (simulated clicks / element queries).
+- Detail-pane status color + Inbox count badge.
+
+## [0.1.13] - 2026-06-04
+
+### Added
+- **Color-coded status pills + priority** in the issue list — status by category
+  (To Do gray · In Progress blue · Done green) and priority by level (High red ·
+  Medium orange · Low gray), so the list scans at a glance. Categories are a
+  name heuristic covering standard Jira workflows.
+- **Empty state** — a friendly message when My Work / Inbox has nothing.
 
 ## [0.1.12] - 2026-06-04
 

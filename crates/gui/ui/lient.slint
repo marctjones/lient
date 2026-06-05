@@ -4,7 +4,9 @@ export struct IssueRow {
     key: string,
     summary: string,
     status: string,
+    status-cat: string, // "todo" | "doing" | "done"
     priority: string,
+    prio-cat: string,   // "high" | "med" | "low" | ""
     itype: string,
     assignee: string,
 }
@@ -326,6 +328,10 @@ export component AppWindow inherits Window {
                 width: 392px;
                 background: white;
                 Rectangle { x: parent.width - 1px; width: 1px; background: #e3e6ea; }
+                if root.issues.length == 0 && !root.loading: Text {
+                    text: root.inbox-mode ? "Nothing needs attention 🎉" : "No issues assigned to you 🎉";
+                    color: #8a96a3; horizontal-alignment: center; vertical-alignment: center;
+                }
                 ListView {
                     for it[i] in root.issues: Rectangle {
                         height: 60px;
@@ -336,9 +342,23 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 7px;
                                 Text { text: it.key; font-weight: 700; color: #2d6cdf; font-size: 12px; }
-                                Text { text: it.status; color: #59636e; font-size: 12px; }
+                                // colored status pill
+                                Rectangle {
+                                    border-radius: 4px;
+                                    background: it.status-cat == "done" ? #e6f5ec : (it.status-cat == "doing" ? #e3effd : #eef1f4);
+                                    HorizontalLayout {
+                                        padding-left: 6px; padding-right: 6px;
+                                        Text {
+                                            text: it.status; font-size: 11px; vertical-alignment: center;
+                                            color: it.status-cat == "done" ? #1f8a4c : (it.status-cat == "doing" ? #2d6cdf : #59636e);
+                                        }
+                                    }
+                                }
                                 Rectangle { horizontal-stretch: 1; }
-                                Text { text: it.priority; color: #8a96a3; font-size: 12px; }
+                                Text {
+                                    text: it.priority; font-size: 12px;
+                                    color: it.prio-cat == "high" ? #d23f3f : (it.prio-cat == "med" ? #c2740a : #8a96a3);
+                                }
                             }
                             Text { text: it.summary; color: #1b2a3a; overflow: elide; }
                         }

@@ -799,9 +799,38 @@ fn to_row(i: &Issue) -> IssueRow {
         key: i.key.clone().into(),
         summary: i.summary().into(),
         status: i.status().into(),
+        status_cat: status_cat(i.status()).into(),
         priority: i.priority().into(),
+        prio_cat: prio_cat(i.priority()).into(),
         itype: i.issue_type().into(),
         assignee: i.assignee().into(),
+    }
+}
+
+/// Map a status name to a category for coloring (heuristic on common names —
+/// Jira's exact names vary, but these cover the standard workflows).
+fn status_cat(s: &str) -> &'static str {
+    let l = s.to_lowercase();
+    if l.contains("done") || l.contains("closed") || l.contains("resolved") || l.contains("complete") || l.contains("cancel") {
+        "done"
+    } else if l.contains("progress") || l.contains("review") || l.contains("doing") || l.contains("develop") || l.contains("testing") {
+        "doing"
+    } else {
+        "todo"
+    }
+}
+
+/// Map a priority name to a color category.
+fn prio_cat(p: &str) -> &'static str {
+    let l = p.to_lowercase();
+    if l.is_empty() {
+        ""
+    } else if l.contains("highest") || l.contains("high") || l.contains("critical") || l.contains("blocker") || l.contains("urgent") {
+        "high"
+    } else if l.contains("medium") || l.contains("normal") || l.contains("major") {
+        "med"
+    } else {
+        "low"
     }
 }
 
@@ -904,6 +933,20 @@ mod ui_tests {
         for (id, _) in COMMANDS {
             assert!(matches!(*id, "new" | "refresh" | "edit" | "open" | "account" | "quit"));
         }
+    }
+
+    #[test]
+    fn status_and_priority_categories() {
+        assert_eq!(status_cat("In Progress"), "doing");
+        assert_eq!(status_cat("In Review"), "doing");
+        assert_eq!(status_cat("Done"), "done");
+        assert_eq!(status_cat("Resolved"), "done");
+        assert_eq!(status_cat("To Do"), "todo");
+        assert_eq!(status_cat("Backlog"), "todo");
+        assert_eq!(prio_cat("Highest"), "high");
+        assert_eq!(prio_cat("Medium"), "med");
+        assert_eq!(prio_cat("Low"), "low");
+        assert_eq!(prio_cat(""), "");
     }
 
     #[test]
