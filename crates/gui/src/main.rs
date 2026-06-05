@@ -563,6 +563,13 @@ fn load_list(ui: &AppWindow, jira: Arc<dyn Jira>) {
 }
 
 fn load_detail(ui: &AppWindow, jira: Arc<dyn Jira>, key: String) {
+    // show the cached detail instantly (and keep it if the network is down)
+    if !ui.get_demo() {
+        if let Some(cached) = detail_cache_load(&key) {
+            apply_detail(ui, &cached, &[]);
+        }
+    }
+    let demo = ui.get_demo();
     run(
         ui,
         jira,
@@ -571,7 +578,12 @@ fn load_detail(ui: &AppWindow, jira: Arc<dyn Jira>, key: String) {
             let trans = j.transitions(&key).unwrap_or_default();
             Ok((issue, trans))
         },
-        |ui, (issue, trans)| apply_detail(&ui, &issue, &trans),
+        move |ui, (issue, trans)| {
+            if !demo {
+                detail_cache_save(&issue);
+            }
+            apply_detail(&ui, &issue, &trans);
+        },
     );
 }
 
@@ -764,6 +776,25 @@ fn cache_load() -> Vec<Issue> {
         .unwrap_or_default()
 }
 
+fn detail_cache_path(key: &str) -> Option<std::path::PathBuf> {
+    let safe: String = key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    dirs::cache_dir().map(|d| d.join("lient").join("details").join(format!("{safe}.json")))
+}
+fn detail_cache_save(issue: &Issue) {
+    if let Some(p) = detail_cache_path(&issue.key) {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(j) = serde_json::to_string(issue) {
+            let _ = std::fs::write(p, j);
+        }
+    }
+}
+fn detail_cache_load(key: &str) -> Option<Issue> {
+    let s = std::fs::read_to_string(detail_cache_path(key)?).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
 fn to_row(i: &Issue) -> IssueRow {
     IssueRow {
         key: i.key.clone().into(),
@@ -882,5 +913,11 @@ mod ui_tests {
         cache_save(&issues);
         let back = cache_load();
         assert_eq!(back.first().map(|i| i.key.as_str()), Some("X-1"));
+
+        // detail cache roundtrips per key
+        detail_cache_save(&sample_issue());
+        let d = detail_cache_load("X-1").expect("cached detail");
+        assert_eq!(d.summary(), "Hi there");
+        assert!(detail_cache_load("NOPE-9").is_none());
     }
 }

@@ -9,6 +9,14 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 - Edit dialog: prefilling current custom-field values.
 - More GUI automation tests (simulated clicks / element queries).
 
+## [0.1.11] - 2026-06-04
+
+### Added
+- **Detail-level cache** — each opened issue's detail (description + comments) is
+  cached per key; reopening shows it instantly, and if the network is down the
+  cached detail stays visible. With the list cache, the app now reads offline
+  end-to-end. (Demo mode doesn't cache.)
+
 ## [0.1.10] - 2026-06-04
 
 ### Added
