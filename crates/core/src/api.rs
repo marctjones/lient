@@ -92,6 +92,6 @@ impl Jira for JiraClient {
         JiraClient::create_issue(self, project_key, issue_type, summary, description, extra_fields)
     }
     fn browse_url(&self, key: &str) -> String {
-        self.config().browse_url(key)
+        JiraClient::browse_url(self, key)
     }
 }

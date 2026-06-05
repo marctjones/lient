@@ -6,9 +6,22 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Local cache / offline.
 - Edit dialog: prefilling current custom-field values.
-- OAuth token auto-refresh on expiry.
+- More GUI automation tests (simulated clicks / element queries).
+
+## [0.1.9] - 2026-06-04
+
+### Added
+- **OAuth token auto-refresh** — the client refreshes an expired (or near-expiry)
+  OAuth access token before each request using the refresh token, and re-persists
+  it. Sessions no longer drop mid-day. The config behind a `Mutex` so refresh is
+  transparent to callers.
+- **Local cache (instant + offline open)** — the My Work list is cached to the OS
+  cache dir; on launch it's shown instantly, then refreshed from the network. If
+  the fetch fails (offline), the cached list stays visible.
+- **GUI automation tests** — a headless Slint testing backend constructs the real
+  `AppWindow` and asserts the list/detail bindings, plus palette + cache logic.
+  Runs in CI on every push.
 
 ## [0.1.8] - 2026-06-04
 

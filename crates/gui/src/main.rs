@@ -462,6 +462,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ---- initial load ----------------------------------------------------
     if view == "main" {
+        // show the cached My Work list instantly, then refresh from the network
+        if !demo {
+            let cached = cache_load();
+            if !cached.is_empty() {
+                ui.set_issues(ModelRc::new(VecModel::from(cached.iter().map(to_row).collect::<Vec<_>>())));
+            }
+        }
         load_me(&ui, cell.borrow().clone());
         load_list(&ui, cell.borrow().clone());
     }
@@ -547,6 +554,10 @@ fn load_list(ui: &AppWindow, jira: Arc<dyn Jira>) {
             ui.set_error("".into());
             let rows: Vec<IssueRow> = issues.iter().map(to_row).collect();
             ui.set_issues(ModelRc::new(VecModel::from(rows)));
+            // cache the My Work list for instant/offline open next time
+            if !ui.get_inbox_mode() {
+                cache_save(&issues);
+            }
         },
     );
 }
@@ -731,6 +742,28 @@ fn prefill_field(fkey: &str, f: &TransitionField, issue: &Issue, is_select: bool
     }
 }
 
+// ---- local cache (instant open + offline read of the My Work list) ----------
+
+fn cache_path() -> Option<std::path::PathBuf> {
+    dirs::cache_dir().map(|d| d.join("lient").join("my-work.json"))
+}
+fn cache_save(issues: &[Issue]) {
+    if let Some(p) = cache_path() {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(j) = serde_json::to_string(issues) {
+            let _ = std::fs::write(p, j);
+        }
+    }
+}
+fn cache_load() -> Vec<Issue> {
+    cache_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<Vec<Issue>>(&s).ok())
+        .unwrap_or_default()
+}
+
 fn to_row(i: &Issue) -> IssueRow {
     IssueRow {
         key: i.key.clone().into(),
@@ -785,5 +818,69 @@ fn to_comment(c: &Comment) -> CommentRow {
         author: c.author.as_ref().map(|a| a.display_name.clone()).unwrap_or_default().into(),
         body: c.body.clone().into(),
         created: c.created.chars().take(10).collect::<String>().into(),
+    }
+}
+
+#[cfg(test)]
+mod ui_tests {
+    //! Headless GUI tests: construct the real `AppWindow` via Slint's testing
+    //! backend and assert the data-binding helpers + pure logic. Locks the
+    //! conversion/binding behavior that the rest of the app relies on.
+    use super::*;
+    use slint::Model;
+
+    fn sample_issue() -> Issue {
+        serde_json::from_str(
+            r#"{"key":"X-1","fields":{"summary":"Hi there","status":{"name":"To Do"},
+                "priority":{"name":"High"},"issuetype":{"name":"Task"},
+                "assignee":{"displayName":"Sam"},"labels":["urgent"]}}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn window_constructs_binds_detail_and_list() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = AppWindow::new().unwrap();
+        let issue = sample_issue();
+
+        // row conversion
+        let row = to_row(&issue);
+        assert_eq!(row.key, "X-1");
+        assert_eq!(row.status, "To Do");
+        assert_eq!(row.assignee, "Sam");
+
+        // list model populates the window
+        ui.set_issues(slint::ModelRc::new(slint::VecModel::from(vec![to_row(&issue)])));
+        assert_eq!(ui.get_issues().row_count(), 1);
+
+        // detail binding sets the Slint properties
+        apply_detail(&ui, &issue, &[]);
+        assert_eq!(ui.get_d_summary().as_str(), "Hi there");
+        assert_eq!(ui.get_d_status().as_str(), "To Do");
+        let meta = ui.get_d_meta();
+        assert!(meta.contains("High") && meta.contains("Sam") && meta.contains("urgent"));
+    }
+
+    #[test]
+    fn palette_commands_filter() {
+        let hits: Vec<&str> = COMMANDS
+            .iter()
+            .filter(|(_, l)| l.to_lowercase().contains("refresh"))
+            .map(|(_, l)| *l)
+            .collect();
+        assert_eq!(hits.len(), 1);
+        // every command id is dispatchable (matches the on_palette_run arms)
+        for (id, _) in COMMANDS {
+            assert!(matches!(*id, "new" | "refresh" | "edit" | "open" | "account" | "quit"));
+        }
+    }
+
+    #[test]
+    fn cache_roundtrips() {
+        let issues = vec![sample_issue()];
+        cache_save(&issues);
+        let back = cache_load();
+        assert_eq!(back.first().map(|i| i.key.as_str()), Some("X-1"));
     }
 }

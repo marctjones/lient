@@ -1,10 +1,10 @@
 //! Typed views over the Jira REST API v2 JSON. Only the fields a daily-driver
 //! needs are modeled; everything else is ignored (serde tolerates extra keys).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Result of a JQL search (`/search`).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     #[serde(default)]
     pub issues: Vec<Issue>,
@@ -15,7 +15,7 @@ pub struct SearchResult {
 }
 
 /// A single issue, flattened to the bits the UI shows.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Issue {
     pub key: String,
     #[serde(default)]
@@ -42,7 +42,7 @@ impl Issue {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Fields {
     #[serde(default)]
     pub summary: String,
@@ -64,7 +64,7 @@ pub struct Fields {
 }
 
 /// Any `{ name, id }`-shaped reference (status, priority, issue type, …).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamedRef {
     #[serde(default)]
     pub name: String,
@@ -72,7 +72,7 @@ pub struct NamedRef {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     #[serde(default, rename = "displayName")]
     pub display_name: String,
@@ -85,7 +85,7 @@ pub struct User {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommentPage {
     #[serde(default)]
     pub comments: Vec<Comment>,
@@ -93,7 +93,7 @@ pub struct CommentPage {
     pub total: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
     #[serde(default)]
     pub id: String,
@@ -105,7 +105,7 @@ pub struct Comment {
 }
 
 /// A workflow transition available from an issue's current status.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transition {
     pub id: String,
     #[serde(default)]
@@ -118,7 +118,7 @@ pub struct Transition {
     pub fields: std::collections::BTreeMap<String, TransitionField>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TransitionField {
     #[serde(default)]
     pub required: bool,
@@ -141,7 +141,7 @@ impl TransitionField {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FieldSchema {
     #[serde(default, rename = "type")]
     pub type_: String,
@@ -149,7 +149,7 @@ pub struct FieldSchema {
     pub items: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AllowedValue {
     #[serde(default)]
     pub id: String,
@@ -170,7 +170,7 @@ impl AllowedValue {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionsResponse {
     #[serde(default)]
     pub transitions: Vec<Transition>,
@@ -178,7 +178,7 @@ pub struct TransitionsResponse {
 
 /// `/issue/{key}/editmeta` — the fields editable on this issue (standard + custom),
 /// each with the same shape as a transition field (name / schema / allowedValues).
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EditMeta {
     #[serde(default)]
     pub fields: std::collections::BTreeMap<String, TransitionField>,
@@ -186,13 +186,13 @@ pub struct EditMeta {
 
 /// `/issue/createmeta?expand=projects.issuetypes.fields` — the projects you can
 /// create in, the issue types each offers, and the fields each type requires.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateMeta {
     #[serde(default)]
     pub projects: Vec<CreateProject>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProject {
     #[serde(default)]
     pub key: String,
@@ -202,7 +202,7 @@ pub struct CreateProject {
     pub issuetypes: Vec<CreateIssueType>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateIssueType {
     #[serde(default)]
     pub name: String,

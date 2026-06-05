@@ -48,9 +48,35 @@ pub fn login(client_id: &str, client_secret: Option<&str>) -> Result<JiraConfig>
             refresh_token: token.refresh_token,
             expires_at: now_secs() + token.expires_in,
             cloud_id,
+            client_id: client_id.to_string(),
         },
         api_version: "3".into(),
     })
+}
+
+/// Exchange a refresh token for a fresh access token. Returns
+/// (access_token, refresh_token, expires_at_epoch_secs).
+pub fn refresh(client_id: &str, refresh_token: &str) -> Result<(String, String, i64)> {
+    let body = serde_json::json!({
+        "grant_type": "refresh_token",
+        "client_id": client_id,
+        "refresh_token": refresh_token,
+    });
+    let resp = ureq::post(TOKEN).set("Content-Type", "application/json").send_string(&body.to_string());
+    let text = match resp {
+        Ok(r) => r.into_string().unwrap_or_default(),
+        Err(ureq::Error::Status(c, r)) => bail!("token refresh failed ({c}): {}", r.into_string().unwrap_or_default()),
+        Err(e) => bail!("token refresh request failed: {e}"),
+    };
+    let t: TokenResponse = serde_json::from_str(&text).context("parsing the refresh response")?;
+    // Atlassian may or may not rotate the refresh token; keep the old if absent.
+    let new_refresh = if t.refresh_token.is_empty() { refresh_token.to_string() } else { t.refresh_token };
+    Ok((t.access_token, new_refresh, now_secs() + t.expires_in))
+}
+
+/// Seconds since the Unix epoch (exposed for the client's expiry check).
+pub fn epoch_secs() -> i64 {
+    now_secs()
 }
 
 /// (code_verifier, code_challenge) for PKCE S256.

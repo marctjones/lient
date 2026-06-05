@@ -26,6 +26,9 @@ pub enum Auth {
         expires_at: i64,
         /// The Atlassian cloud id of the selected site (from accessible-resources).
         cloud_id: String,
+        /// The OAuth app's client id — needed to refresh the access token.
+        #[serde(default)]
+        client_id: String,
     },
     /// Escape hatch for SSO/proxy instances: a verbatim `Authorization` header.
     Raw { header: String },
@@ -203,7 +206,7 @@ mod tests {
         );
         assert_eq!(mk(Auth::Bearer { token: "PAT".into() }).auth_header(), "Bearer PAT");
         assert_eq!(
-            mk(Auth::OAuth { access_token: "AT".into(), refresh_token: "RT".into(), expires_at: 0, cloud_id: "cid".into() }).auth_header(),
+            mk(Auth::OAuth { access_token: "AT".into(), refresh_token: "RT".into(), expires_at: 0, cloud_id: "cid".into(), client_id: String::new() }).auth_header(),
             "Bearer AT"
         );
         assert_eq!(
@@ -216,7 +219,7 @@ mod tests {
     fn oauth_routes_through_atlassian_api() {
         let c = JiraConfig {
             base_url: "https://acme.atlassian.net".into(),
-            auth: Auth::OAuth { access_token: "AT".into(), refresh_token: String::new(), expires_at: 0, cloud_id: "abc-123".into() },
+            auth: Auth::OAuth { access_token: "AT".into(), refresh_token: String::new(), expires_at: 0, cloud_id: "abc-123".into(), client_id: String::new() },
             api_version: "3".into(),
         };
         // API calls go to api.atlassian.com/ex/jira/{cloudId}, …

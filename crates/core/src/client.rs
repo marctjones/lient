@@ -2,13 +2,16 @@
 //! a quick request and the GUI runs them off the UI thread. Read + light-write
 //! only (the Lient scope): search, fetch, transition, comment, assign, create.
 
-use crate::config::JiraConfig;
+use crate::config::{Auth, JiraConfig};
 use crate::model::*;
 use anyhow::{bail, Result};
 use serde_json::json;
+use std::sync::Mutex;
 
 pub struct JiraClient {
-    cfg: JiraConfig,
+    /// Behind a Mutex so an expired OAuth token can be refreshed in place before
+    /// a request (and re-persisted), transparently to callers.
+    cfg: Mutex<JiraConfig>,
     agent: ureq::Agent,
 }
 
@@ -21,11 +24,52 @@ impl JiraClient {
         let agent = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_secs(20))
             .build();
-        Self { cfg, agent }
+        Self { cfg: Mutex::new(cfg), agent }
     }
 
-    pub fn config(&self) -> &JiraConfig {
-        &self.cfg
+    // ---- config access (locks) ------------------------------------------
+    fn api_url(&self, path: &str) -> String {
+        self.cfg.lock().unwrap().api_url(path)
+    }
+    fn servicedesk_url(&self, path: &str) -> String {
+        self.cfg.lock().unwrap().servicedesk_url(path)
+    }
+    pub fn browse_url(&self, key: &str) -> String {
+        self.cfg.lock().unwrap().browse_url(key)
+    }
+    /// Cloud (API token / OAuth) identifies users by accountId; Server/DC by name.
+    fn is_cloud(&self) -> bool {
+        matches!(self.cfg.lock().unwrap().auth, Auth::Basic { .. } | Auth::OAuth { .. })
+    }
+
+    /// Refresh the OAuth access token if it's expired (or within 60s of it).
+    /// No-op for non-OAuth auth. Network call is made without holding the lock.
+    fn ensure_fresh(&self) {
+        let params = {
+            let cfg = self.cfg.lock().unwrap();
+            match &cfg.auth {
+                Auth::OAuth { expires_at, refresh_token, client_id, .. }
+                    if *expires_at != 0 && !refresh_token.is_empty() && crate::oauth::epoch_secs() >= *expires_at - 60 =>
+                {
+                    Some((client_id.clone(), refresh_token.clone()))
+                }
+                _ => None,
+            }
+        };
+        let Some((client_id, refresh_token)) = params else { return };
+        if let Ok((access, new_refresh, new_exp)) = crate::oauth::refresh(&client_id, &refresh_token) {
+            let mut cfg = self.cfg.lock().unwrap();
+            if let Auth::OAuth { access_token, refresh_token, expires_at, .. } = &mut cfg.auth {
+                *access_token = access;
+                *refresh_token = new_refresh;
+                *expires_at = new_exp;
+            }
+            let _ = cfg.save();
+        }
+    }
+
+    fn auth_header(&self) -> String {
+        self.cfg.lock().unwrap().auth_header()
     }
 
     // ---- reads -----------------------------------------------------------
@@ -37,7 +81,7 @@ impl JiraClient {
 
     /// Arbitrary JQL search.
     pub fn search(&self, jql: &str, max: u32) -> Result<SearchResult> {
-        let url = self.cfg.api_url("search");
+        let url = self.api_url("search");
         let body = self
             .get(&url)
             .query("jql", jql)
@@ -49,21 +93,21 @@ impl JiraClient {
 
     /// Full detail for one issue (description + comments included).
     pub fn issue(&self, key: &str) -> Result<Issue> {
-        let url = self.cfg.api_url(&format!("issue/{key}"));
+        let url = self.api_url(&format!("issue/{key}"));
         let body = self.get(&url).query("fields", DETAIL_FIELDS).call_text()?;
         Ok(serde_json::from_str(&body)?)
     }
 
     /// Confirm the connection works and return the current user.
     pub fn myself(&self) -> Result<User> {
-        let url = self.cfg.api_url("myself");
+        let url = self.api_url("myself");
         let body = self.get(&url).call_text()?;
         Ok(serde_json::from_str(&body)?)
     }
 
     /// Available workflow transitions, with the fields each requires.
     pub fn transitions(&self, key: &str) -> Result<Vec<Transition>> {
-        let url = self.cfg.api_url(&format!("issue/{key}/transitions"));
+        let url = self.api_url(&format!("issue/{key}/transitions"));
         let body = self.get(&url).query("expand", "transitions.fields").call_text()?;
         let resp: TransitionsResponse = serde_json::from_str(&body)?;
         Ok(resp.transitions)
@@ -72,7 +116,7 @@ impl JiraClient {
     /// Projects × issue types you can create in, each with its required fields
     /// (for the "New issue" dialog). One createmeta call, fields included.
     pub fn create_targets(&self) -> Result<Vec<crate::model::CreateOption>> {
-        let url = self.cfg.api_url("issue/createmeta");
+        let url = self.api_url("issue/createmeta");
         let body = self.get(&url).query("expand", "projects.issuetypes.fields").call_text()?;
         let meta: crate::model::CreateMeta = serde_json::from_str(&body)?;
         let mut out = Vec::new();
@@ -96,7 +140,7 @@ impl JiraClient {
 
     /// Users who can be assigned this issue (for the assignee picker).
     pub fn assignable_users(&self, issue_key: &str) -> Result<Vec<User>> {
-        let url = self.cfg.api_url("user/assignable/search");
+        let url = self.api_url("user/assignable/search");
         let body = self.get(&url).query("issueKey", issue_key).query("maxResults", "50").call_text()?;
         Ok(serde_json::from_str(&body)?)
     }
@@ -104,7 +148,7 @@ impl JiraClient {
     /// Fields editable on this issue (standard + custom), with their types and
     /// allowed values — used to render the edit dialog.
     pub fn edit_meta(&self, key: &str) -> Result<Vec<(String, crate::model::TransitionField)>> {
-        let url = self.cfg.api_url(&format!("issue/{key}/editmeta"));
+        let url = self.api_url(&format!("issue/{key}/editmeta"));
         let body = self.get(&url).call_text()?;
         let resp: EditMeta = serde_json::from_str(&body)?;
         Ok(resp.fields.into_iter().collect())
@@ -115,7 +159,7 @@ impl JiraClient {
     /// Update fields on an issue. `fields` is the Jira `fields` object, e.g.
     /// `{"priority":{"id":"2"}, "customfield_10010":{"value":"High"}}`.
     pub fn update_issue(&self, key: &str, fields: serde_json::Value) -> Result<()> {
-        let url = self.cfg.api_url(&format!("issue/{key}"));
+        let url = self.api_url(&format!("issue/{key}"));
         self.put(&url).send_text(&json!({ "fields": fields }).to_string())?; // 204 on success
         Ok(())
     }
@@ -123,7 +167,7 @@ impl JiraClient {
     /// Move an issue through a transition. `extra_fields` carries any required
     /// screen fields (e.g. `{"resolution":{"name":"Done"}}`), rendered by the UI.
     pub fn transition(&self, key: &str, transition_id: &str, extra_fields: serde_json::Value) -> Result<()> {
-        let url = self.cfg.api_url(&format!("issue/{key}/transitions"));
+        let url = self.api_url(&format!("issue/{key}/transitions"));
         let mut payload = json!({ "transition": { "id": transition_id } });
         if let Some(obj) = extra_fields.as_object() {
             if !obj.is_empty() {
@@ -138,14 +182,14 @@ impl JiraClient {
     /// reply visible to the customer/requestor; `false` is an internal agent note.
     /// JSM-only (errors on non-service-desk issues).
     pub fn add_request_comment(&self, key: &str, body: &str, public: bool) -> Result<()> {
-        let url = self.cfg.servicedesk_url(&format!("request/{key}/comment"));
+        let url = self.servicedesk_url(&format!("request/{key}/comment"));
         self.post(&url).send_text(&json!({ "body": body, "public": public }).to_string())?;
         Ok(())
     }
 
     /// Add a comment (plain text in API v2).
     pub fn add_comment(&self, key: &str, body: &str) -> Result<Comment> {
-        let url = self.cfg.api_url(&format!("issue/{key}/comment"));
+        let url = self.api_url(&format!("issue/{key}/comment"));
         let resp = self.post(&url).send_text(&json!({ "body": body }).to_string())?;
         Ok(serde_json::from_str(&resp)?)
     }
@@ -153,14 +197,8 @@ impl JiraClient {
     /// Assign an issue. Pass the Cloud `accountId` or the Server `name`; we set
     /// the correct field for each flavor.
     pub fn assign(&self, key: &str, assignee: &str) -> Result<()> {
-        let url = self.cfg.api_url(&format!("issue/{key}/assignee"));
-        // Cloud (API token / OAuth) identifies users by accountId; Server/DC by name.
-        let payload = match &self.cfg.auth {
-            crate::config::Auth::Basic { .. } | crate::config::Auth::OAuth { .. } => {
-                json!({ "accountId": assignee })
-            }
-            _ => json!({ "name": assignee }),
-        };
+        let url = self.api_url(&format!("issue/{key}/assignee"));
+        let payload = if self.is_cloud() { json!({ "accountId": assignee }) } else { json!({ "name": assignee }) };
         self.put(&url).send_text(&payload.to_string())?;
         Ok(())
     }
@@ -174,7 +212,7 @@ impl JiraClient {
         description: Option<&str>,
         extra_fields: serde_json::Value,
     ) -> Result<String> {
-        let url = self.cfg.api_url("issue");
+        let url = self.api_url("issue");
         let mut fields = json!({
             "project": { "key": project_key },
             "issuetype": { "name": issue_type },
@@ -196,13 +234,16 @@ impl JiraClient {
     // ---- request plumbing ------------------------------------------------
 
     fn get(&self, url: &str) -> Req {
-        Req::new(self.agent.get(url), &self.cfg, false)
+        self.ensure_fresh();
+        Req::new(self.agent.get(url), &self.auth_header(), false)
     }
     fn post(&self, url: &str) -> Req {
-        Req::new(self.agent.post(url), &self.cfg, true)
+        self.ensure_fresh();
+        Req::new(self.agent.post(url), &self.auth_header(), true)
     }
     fn put(&self, url: &str) -> Req {
-        Req::new(self.agent.put(url), &self.cfg, true)
+        self.ensure_fresh();
+        Req::new(self.agent.put(url), &self.auth_header(), true)
     }
 }
 
@@ -217,10 +258,8 @@ struct Req {
 }
 
 impl Req {
-    fn new(mut inner: ureq::Request, cfg: &JiraConfig, json_body: bool) -> Self {
-        inner = inner
-            .set("Authorization", &cfg.auth_header())
-            .set("Accept", "application/json");
+    fn new(mut inner: ureq::Request, auth_header: &str, json_body: bool) -> Self {
+        inner = inner.set("Authorization", auth_header).set("Accept", "application/json");
         if json_body {
             inner = inner.set("Content-Type", "application/json");
         }
