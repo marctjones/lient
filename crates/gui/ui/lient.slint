@@ -113,6 +113,7 @@ export component AppWindow inherits Window {
     in-out property <string> selected-key;
     in property <string> d-summary;
     in property <string> d-status;
+    in property <string> d-status-cat; // "todo" | "doing" | "done"
     in property <string> d-meta;
     in property <string> d-desc;
     in property <[CommentRow]> comments;
@@ -305,8 +306,8 @@ export component AppWindow inherits Window {
                 padding-right: 14px;
                 spacing: 10px;
                 Text { text: "Lient"; font-size: 17px; font-weight: 800; color: #1b2a3a; vertical-alignment: center; }
-                Seg { label: "My Work"; active: !root.inbox-mode; clicked => { root.inbox-mode = false; root.refresh(); } }
-                Seg { label: "Inbox"; active: root.inbox-mode; clicked => { root.inbox-mode = true; root.refresh(); } }
+                Seg { label: !root.inbox-mode ? "My Work (" + root.issues.length + ")" : "My Work"; active: !root.inbox-mode; clicked => { root.inbox-mode = false; root.refresh(); } }
+                Seg { label: root.inbox-mode ? "Inbox (" + root.issues.length + ")" : "Inbox"; active: root.inbox-mode; clicked => { root.inbox-mode = true; root.refresh(); } }
                 Text { text: root.demo ? "demo mode" : ""; color: #c2740a; font-size: 12px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: root.loading ? "loading…" : root.me; color: #59636e; font-size: 12px; vertical-alignment: center; }
@@ -379,7 +380,19 @@ export component AppWindow inherits Window {
                         padding: 16px;
                         spacing: 10px;
                         HorizontalBox {
-                            Text { text: root.selected-key + "  ·  " + root.d-status; font-weight: 700; color: #2d6cdf; vertical-alignment: center; }
+                            Text { text: root.selected-key; font-weight: 700; color: #2d6cdf; vertical-alignment: center; }
+                            Rectangle {
+                                border-radius: 4px;
+                                horizontal-stretch: 0;
+                                background: root.d-status-cat == "done" ? #e6f5ec : (root.d-status-cat == "doing" ? #e3effd : #eef1f4);
+                                HorizontalLayout {
+                                    padding-left: 7px; padding-right: 7px; padding-top: 3px; padding-bottom: 3px;
+                                    Text {
+                                        text: root.d-status; font-size: 11px; vertical-alignment: center;
+                                        color: root.d-status-cat == "done" ? #1f8a4c : (root.d-status-cat == "doing" ? #2d6cdf : #59636e);
+                                    }
+                                }
+                            }
                             Rectangle { horizontal-stretch: 1; }
                             Button { text: "✎ Edit"; clicked => { root.edit-issue(root.selected-key); } }
                             Button { text: "Open in browser ↗"; clicked => { root.open-browser(root.selected-key); } }

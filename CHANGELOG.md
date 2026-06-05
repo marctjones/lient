@@ -7,7 +7,14 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 
 ### In progress
 - More GUI automation tests (simulated clicks / element queries).
-- Detail-pane status color + Inbox count badge.
+- Optional: color status from Jira's real `statusCategory` (vs the name heuristic).
+
+## [0.1.14] - 2026-06-04
+
+### Added
+- **Detail-pane status pill** — the open issue's status is shown as a colored
+  pill matching the list (To Do / In Progress / Done).
+- **List counts** — the My Work / Inbox toggle shows the count of the active view.
 
 ## [0.1.13] - 2026-06-04
 

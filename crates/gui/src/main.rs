@@ -839,6 +839,7 @@ fn apply_detail(ui: &AppWindow, issue: &Issue, trans: &[Transition]) {
     TRANSITIONS.with(|t| *t.borrow_mut() = trans.to_vec());
     ui.set_d_summary(issue.summary().into());
     ui.set_d_status(issue.status().into());
+    ui.set_d_status_cat(status_cat(issue.status()).into());
     let mut meta = format!("{} · {} · {}", issue.issue_type(), issue.priority(), issue.assignee());
     if !issue.fields.labels.is_empty() {
         meta.push_str(&format!(" · {}", issue.fields.labels.join(", ")));
