@@ -138,6 +138,15 @@ impl JiraClient {
         Ok(out)
     }
 
+    /// The issue's raw `fields` object (all fields, including custom) — used to
+    /// prefill the edit dialog with current values.
+    pub fn raw_fields(&self, key: &str) -> Result<serde_json::Map<String, serde_json::Value>> {
+        let url = self.api_url(&format!("issue/{key}"));
+        let body = self.get(&url).query("fields", "*all").call_text()?;
+        let v: serde_json::Value = serde_json::from_str(&body)?;
+        Ok(v.get("fields").and_then(|f| f.as_object()).cloned().unwrap_or_default())
+    }
+
     /// Users who can be assigned this issue (for the assignee picker).
     pub fn assignable_users(&self, issue_key: &str) -> Result<Vec<User>> {
         let url = self.api_url("user/assignable/search");

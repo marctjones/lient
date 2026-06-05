@@ -174,6 +174,25 @@ impl Jira for MockJira {
         ])
     }
 
+    fn raw_fields(&self, key: &str) -> Result<serde_json::Map<String, Value>> {
+        let i = self.issue(key)?;
+        let mut m = serde_json::Map::new();
+        m.insert("summary".into(), Value::String(i.summary().into()));
+        if let Some(p) = &i.fields.priority {
+            m.insert("priority".into(), serde_json::json!({ "id": p.id, "name": p.name }));
+        }
+        if let Some(a) = &i.fields.assignee {
+            m.insert("assignee".into(), serde_json::json!({ "accountId": a.account_id, "displayName": a.display_name }));
+        }
+        if let Some(d) = &i.fields.duedate {
+            m.insert("duedate".into(), Value::String(d.clone()));
+        }
+        m.insert("labels".into(), serde_json::json!(i.fields.labels));
+        // a current value for the demo custom field
+        m.insert("customfield_10010".into(), serde_json::json!({ "id": "100", "value": "Sev-1" }));
+        Ok(m)
+    }
+
     fn assignable_users(&self, _key: &str) -> Result<Vec<User>> {
         let me = self.state.lock().unwrap().me.clone();
         Ok(vec![

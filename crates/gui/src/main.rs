@@ -294,11 +294,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 jira,
                 move |j| {
                     let metas = j.edit_meta(&k)?;
-                    let issue = j.issue(&k)?; // for prefilling current values
                     let users = j.assignable_users(&k).unwrap_or_default(); // assignee picker
-                    Ok((k, metas, issue, users))
+                    let raw = j.raw_fields(&k).unwrap_or_default(); // current values to prefill
+                    Ok((k, metas, users, raw))
                 },
-                |ui, (k, metas, issue, users)| open_edit_dialog(&ui, k, metas, &issue, &users),
+                |ui, (k, metas, users, raw)| open_edit_dialog(&ui, k, metas, &users, &raw),
             );
         });
     }
@@ -629,7 +629,7 @@ fn open_transition_dialog(ui: &AppWindow, key: String, tid: String, req: Vec<(St
 /// Populate and open the edit dialog from the issue's editmeta. Shows a curated
 /// set (summary / priority / due date) plus any custom fields, prefilled where we
 /// have the current value; only touched fields are submitted.
-fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionField)>, issue: &Issue, users: &[User]) {
+fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionField)>, users: &[User], raw: &serde_json::Map<String, serde_json::Value>) {
     let mut pfields = Vec::new();
     let mut rows: Vec<FieldRow> = Vec::new();
     for (fkey, mut f) in metas {
@@ -651,7 +651,7 @@ fn open_edit_dialog(ui: &AppWindow, key: String, metas: Vec<(String, TransitionF
         }
         let is_select = f.has_options();
         let options: Vec<SharedString> = f.allowed_values.iter().map(|a| a.label().into()).collect();
-        let (init_id, init_label) = prefill_field(&fkey, &f, issue, is_select);
+        let (init_id, init_label) = prefill_from_raw(&fkey, &f, raw, is_select);
         rows.push(FieldRow {
             name: f.name.clone().into(),
             options: ModelRc::new(VecModel::from(options)),
@@ -723,35 +723,34 @@ fn build_create_dialog(ui: &AppWindow, selected_id: &str, summary: &str, descrip
     });
 }
 
-/// Prefill an edit field from the issue's current values where we can.
-fn prefill_field(fkey: &str, f: &TransitionField, issue: &Issue, is_select: bool) -> (String, String) {
-    match fkey {
-        "summary" => (issue.summary().to_string(), issue.summary().to_string()),
-        "duedate" => {
-            let d = issue.fields.duedate.clone().unwrap_or_default();
-            (d.clone(), d)
+/// Prefill an edit field from the issue's raw current values. Returns
+/// (submit_value, display_label). For pick-lists the submit value is the
+/// allowedValue **id**; for text it's the value itself.
+fn prefill_from_raw(fkey: &str, f: &TransitionField, raw: &serde_json::Map<String, serde_json::Value>, is_select: bool) -> (String, String) {
+    let val = raw.get(fkey);
+    if is_select {
+        // current id: object {"id"|"accountId"|"name": ...} (arrays → first)
+        let cur = val
+            .map(|v| if v.is_array() { v.as_array().and_then(|a| a.first()).unwrap_or(&serde_json::Value::Null) } else { v })
+            .and_then(|v| v.get("id").or_else(|| v.get("accountId")).or_else(|| v.get("name")))
+            .and_then(|x| x.as_str());
+        if let Some(id) = cur {
+            if let Some(av) = f.allowed_values.iter().find(|a| a.id == id) {
+                return (av.id.clone(), av.label().to_string());
+            }
         }
-        "labels" => {
-            let s = issue.fields.labels.join(", ");
-            (s.clone(), s)
-        }
-        "priority" if is_select => f
-            .allowed_values
-            .iter()
-            .find(|a| a.label() == issue.priority())
-            .or_else(|| f.allowed_values.first())
-            .map(|a| (a.id.clone(), a.label().to_string()))
-            .unwrap_or_default(),
-        "assignee" if is_select => f
-            .allowed_values
-            .iter()
-            .find(|a| a.label() == issue.assignee())
-            .or_else(|| f.allowed_values.first())
-            .map(|a| (a.id.clone(), a.label().to_string()))
-            .unwrap_or_default(),
-        _ if is_select => f.allowed_values.first().map(|a| (a.id.clone(), a.label().to_string())).unwrap_or_default(),
-        _ => (String::new(), String::new()),
+        // no current value → default to the first option
+        return f.allowed_values.first().map(|a| (a.id.clone(), a.label().to_string())).unwrap_or_default();
     }
+    if fkey == "labels" {
+        let s = val
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        return (s.clone(), s);
+    }
+    let s = val.and_then(|v| v.as_str()).map(String::from).unwrap_or_default();
+    (s.clone(), s)
 }
 
 // ---- local cache (instant open + offline read of the My Work list) ----------

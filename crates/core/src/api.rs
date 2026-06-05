@@ -18,6 +18,8 @@ pub trait Jira: Send + Sync {
     fn transition(&self, key: &str, transition_id: &str, fields: Value) -> Result<()>;
     /// Projects × issue types you can create in, with each type's required fields.
     fn create_targets(&self) -> Result<Vec<CreateOption>>;
+    /// The issue's raw `fields` object (current values, incl. custom fields).
+    fn raw_fields(&self, key: &str) -> Result<serde_json::Map<String, Value>>;
     /// Users who can be assigned this issue (for the assignee picker).
     fn assignable_users(&self, key: &str) -> Result<Vec<User>>;
     /// Fields editable on this issue (standard + custom), with their metadata.
@@ -62,6 +64,9 @@ impl Jira for JiraClient {
     }
     fn create_targets(&self) -> Result<Vec<CreateOption>> {
         JiraClient::create_targets(self)
+    }
+    fn raw_fields(&self, key: &str) -> Result<serde_json::Map<String, Value>> {
+        JiraClient::raw_fields(self, key)
     }
     fn assignable_users(&self, key: &str) -> Result<Vec<User>> {
         JiraClient::assignable_users(self, key)

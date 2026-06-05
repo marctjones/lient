@@ -6,8 +6,15 @@ SemVer (pre-1.0: minor = features, patch = fixes).
 ## [Unreleased]
 
 ### In progress
-- Edit dialog: prefilling current custom-field values.
 - More GUI automation tests (simulated clicks / element queries).
+
+## [0.1.12] - 2026-06-04
+
+### Added / Changed
+- **Edit dialog prefills current values** — every editable field (priority,
+  assignee, due date, labels, **and custom fields**) now opens showing the
+  issue's *current* value instead of a default, by fetching the raw fields
+  (`fields=*all`). You only change what you mean to. Core adds `raw_fields`.
 
 ## [0.1.11] - 2026-06-04
 
