@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="Lient logo" width="120" height="120">
+</p>
+
 # Lient
 
 A fast, native **personal Jira daily-driver** — for getting through your assigned
